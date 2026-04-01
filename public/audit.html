@@ -37,7 +37,10 @@
         let auditName = "";
         const CAT_ORDER = { "Video": 1, "Sound": 2, "Lighting": 3, "Grip": 4 };
 
-        function esc(str) { return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+        function esc(str) { 
+            if (!str) return "";
+            return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); 
+        }
 
         window.onload = async () => {
             const params = new URLSearchParams(window.location.search);
@@ -45,19 +48,38 @@
             const newName = params.get('name');
 
             if (resumeId) {
+                // Resume logic: Get from audit history
                 const res = await fetch('/api/history');
                 const history = await res.json();
                 const audit = history.find(a => a.id == resumeId);
-                if(audit) { activeItems = audit.items; currentAuditId = audit.id; auditName = audit.name; }
+                if(audit) { 
+                    activeItems = audit.items; 
+                    currentAuditId = audit.id; 
+                    auditName = audit.name; 
+                }
             } else if (newName) {
+                // Start New logic: Get fresh assets from Master Inventory
                 const res = await fetch('/api/assets');
                 const data = await res.json();
+                
+                // Also check for reported issues to exclude broken items
                 const issueRes = await fetch('/api/issues');
                 const issues = await issueRes.json();
-                const badBarcodes = new Set(issues.filter(i => i.barcode !== 'NONE').map(i => i.barcode));
-                activeItems = data.assets.filter(item => !item.barcode || !badBarcodes.has(item.barcode)).map((item, idx) => ({ ...item, isAudited: false, uid: 'item-'+idx }));
-                currentAuditId = Date.now(); auditName = newName;
-            } else { window.location.href = '/'; }
+                const badBarcodes = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
+
+                activeItems = data.assets
+                    .filter(item => !badBarcodes.has(item.barcode))
+                    .map((item, idx) => ({ 
+                        ...item, 
+                        isAudited: false, 
+                        uid: 'item-' + Date.now() + '-' + idx 
+                    }));
+                
+                currentAuditId = Date.now().toString(); 
+                auditName = newName;
+            } else { 
+                window.location.href = '/'; 
+            }
             render();
         };
 
@@ -65,30 +87,46 @@
             const bc = val.trim().toUpperCase().replace(/^LSA/i, '');
             const inputEl = document.getElementById('scanner');
             if(!bc) return;
+
+            // SISO Check (If item is already marked as Collected/Out)
             const sisoConflict = activeItems.find(item => item.barcode && String(item.barcode).toUpperCase().replace(/^LSA/i, '') === bc && item.isCollected);
-            if (sisoConflict) { alert("🛑 SISO: Item is OUT."); inputEl.value = ''; return; }
+            if (sisoConflict) { 
+                alert("🛑 SISO: Item is marked as OUT in system."); 
+                inputEl.value = ''; 
+                return; 
+            }
+
             let found = false;
             activeItems.forEach(item => { 
-                if (item.barcode && String(item.barcode).toUpperCase().replace(/^LSA/i, '') === bc && !item.isAudited && !found) { 
-                    item.isAudited = true; found = true; manualOverride = false; 
+                const itemBc = String(item.barcode || "").toUpperCase().replace(/^LSA/i, '');
+                if (itemBc === bc && !item.isAudited && !found) { 
+                    item.isAudited = true; 
+                    found = true; 
+                    manualOverride = false; 
                 } 
             });
-            if(!found) { inputEl.classList.add('error-flash'); setTimeout(() => inputEl.classList.remove('error-flash'), 400); }
-            inputEl.value = ''; render();
+
+            if(!found) { 
+                inputEl.classList.add('error-flash'); 
+                setTimeout(() => inputEl.classList.remove('error-flash'), 400); 
+            }
+            inputEl.value = ''; 
+            render();
         }
 
         function bulkSetManual(assetName) {
             const input = document.getElementById(`bulk-input-${assetName}`);
             const targetCount = parseInt(input.value);
             if (isNaN(targetCount)) return;
+
             let updated = 0;
+            // Reset existing manual audits for this item name first
             activeItems.forEach(item => {
-                if (item.name === assetName && !item.barcode && !item.isCollected) {
-                    item.isAudited = false;
-                }
+                if (item.name === assetName && !item.barcode) item.isAudited = false;
             });
+            // Apply new count
             activeItems.forEach(item => {
-                if (item.name === assetName && !item.barcode && !item.isCollected && updated < targetCount) {
+                if (item.name === assetName && !item.barcode && updated < targetCount) {
                     item.isAudited = true;
                     updated++;
                 }
@@ -97,10 +135,21 @@
         }
 
         function render() {
-            const container = document.getElementById('audit-list'); container.innerHTML = '';
+            const container = document.getElementById('audit-list'); 
+            container.innerHTML = '';
             const groups = {};
+
             activeItems.forEach(item => {
-                if (!groups[item.name]) groups[item.name] = { name: item.name, category: item.category, total: 0, out: 0, audited: 0, barcodes: [] };
+                if (!groups[item.name]) {
+                    groups[item.name] = { 
+                        name: item.name, 
+                        category: item.category, 
+                        total: 0, 
+                        out: 0, 
+                        audited: 0, 
+                        barcodes: [] 
+                    };
+                }
                 groups[item.name].total++;
                 if (item.isCollected) groups[item.name].out++;
                 if (item.isAudited) groups[item.name].audited++;
@@ -112,23 +161,22 @@
                 return { ...g, target, isDone: g.audited >= target && target >= 0 };
             }).sort((a,b) => (a.isDone - b.isDone) || (CAT_ORDER[a.category] - CAT_ORDER[b.category]));
 
-            if (!manualOverride) { const next = groupArray.find(g => !g.isDone); if(next) { openNames.clear(); openNames.add(next.name); } }
+            if (!manualOverride) { 
+                const next = groupArray.find(g => !g.isDone); 
+                if(next) { openNames.clear(); openNames.add(next.name); } 
+            }
 
             let globalAudited = 0, globalTarget = 0;
             groupArray.forEach(g => {
-                globalAudited += g.audited; globalTarget += g.target;
+                globalAudited += g.audited; 
+                globalTarget += g.target;
                 const isOpen = openNames.has(g.name);
-                const catClass = `cat-${g.category.replace(/\s/g, '')}`;
+                const catClass = `cat-${(g.category || 'General').replace(/\s/g, '')}`;
                 const hasManualItems = g.barcodes.some(b => !b.barcode && !b.isCollected);
                 const manualScannedCount = g.barcodes.filter(b=>!b.barcode && b.isAudited).length;
                 
-                // Sorting logic for "In-Store": Barcodes first (true before false), then alphabetical
                 const inStoreItems = g.barcodes.filter(b=>!b.isCollected && !b.isAudited)
-                    .sort((a, b) => {
-                        if (a.barcode && !b.barcode) return -1;
-                        if (!a.barcode && b.barcode) return 1;
-                        return 0;
-                    });
+                    .sort((a, b) => (a.barcode ? -1 : 1));
 
                 const div = document.createElement('div');
                 div.className = `audit-row-item ${g.isDone ? 'row-complete' : ''} ${isOpen ? 'open' : ''} ${catClass}`;
@@ -176,7 +224,16 @@
         function toggleAccordion(n) { manualOverride = true; if(openNames.has(n)) openNames.delete(n); else { openNames.clear(); openNames.add(n); } render(); }
         function manualTick(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=true; render(); } }
         function unscan(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=false; render(); } }
-        async function saveAndExit(s) { await fetch('/api/save-audit', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: currentAuditId, name: auditName, items: activeItems, status: s }) }); window.location.href = '/'; }
+        
+        async function saveAndExit(s) { 
+            const res = await fetch('/api/save-audit', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ id: currentAuditId, name: auditName, items: activeItems, status: s }) 
+            }); 
+            if(res.ok) window.location.href = '/';
+            else alert("Error saving session. Check your connection.");
+        }
     </script>
 </body>
 </html>
