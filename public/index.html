@@ -1,39 +1,89 @@
-async function updateMasterCSV() {
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = '.csv';
-    
-    fileInput.onchange = async () => {
-        const file = fileInput.files[0];
-        if (!file) return;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><title>KitStore Dashboard</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans p-8">
+    <div class="max-w-4xl mx-auto">
+        <header class="flex justify-between items-end mb-12">
+            <div>
+                <h1 class="text-6xl font-black tracking-tighter text-white">KIT<span class="text-blue-500">STORE</span></h1>
+                <p class="text-gray-500 font-bold tracking-widest uppercase text-xs mt-2">Equipment Audit & Maintenance</p>
+            </div>
+            <button onclick="updateMasterCSV()" class="bg-gray-800 hover:bg-gray-700 text-gray-400 text-[10px] font-black py-2 px-4 rounded-full border border-gray-700 transition-all">
+                UPDATE MASTER INVENTORY (CSV)
+            </button>
+        </header>
 
-        const formData = new FormData();
-        formData.append('csvFile', file); // This key must match upload.single('csvFile')
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="bg-blue-600 p-8 rounded-3xl shadow-2xl hover:scale-[1.02] transition-transform cursor-pointer group" onclick="startNewAudit()">
+                <h2 class="text-4xl font-black mb-2 italic">START AUDIT</h2>
+                <p class="text-blue-200 font-bold uppercase text-sm">Begin a full store check</p>
+            </div>
 
-        const btn = document.querySelector('button[onclick="updateMasterCSV()"]');
-        const originalText = btn.innerText;
-        btn.innerText = "UPLOADING...";
-        btn.disabled = true;
+            <a href="/maintenance" class="bg-red-600 p-8 rounded-3xl shadow-2xl hover:scale-[1.02] transition-transform group">
+                <h2 class="text-4xl font-black mb-2 italic">MAINTENANCE</h2>
+                <p class="text-red-200 font-bold uppercase text-sm">Report Broken/Missing Items</p>
+            </a>
+        </div>
 
-        try {
-            const res = await fetch('/api/upload-csv', {
-                method: 'POST',
-                body: formData
-            });
+        <div class="mt-12">
+            <h3 class="text-gray-500 font-black uppercase text-xs mb-4 tracking-widest">Recent Activity</h3>
+            <div id="history-list" class="space-y-3">
+                </div>
+        </div>
+    </div>
 
-            if (res.ok) {
-                alert("Master Inventory Updated Successfully!");
-            } else {
-                const errText = await res.text();
-                alert("Upload Failed: " + errText);
-            }
-        } catch (err) {
-            alert("Error: " + err.message);
-        } finally {
-            btn.innerText = originalText;
-            btn.disabled = false;
+    <script>
+        async function updateMasterCSV() {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.csv';
+            
+            fileInput.onchange = async () => {
+                const file = fileInput.files[0];
+                if (!file) return;
+
+                const formData = new FormData();
+                formData.append('csvFile', file);
+
+                const btn = document.querySelector('button[onclick="updateMasterCSV()"]');
+                const originalText = btn.innerText;
+                btn.innerText = "UPLOADING...";
+                btn.disabled = true;
+
+                try {
+                    const res = await fetch('/api/upload-csv', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        alert(`Success! Imported ${data.count} assets to Database.`);
+                        location.reload();
+                    } else {
+                        const err = await res.text();
+                        alert("Upload Failed: " + err);
+                    }
+                } catch (err) {
+                    alert("Error connecting to server: " + err.message);
+                } finally {
+                    btn.innerText = originalText;
+                    btn.disabled = false;
+                }
+            };
+            fileInput.click();
         }
-    };
-    
-    fileInput.click();
-}
+
+        function startNewAudit() {
+            const name = prompt("Enter Audit Name (e.g., 'Weekly Check April'):");
+            if (name) window.location.href = `/audit.html?name=${encodeURIComponent(name)}`;
+        }
+
+        // Fetch history or current status here if needed
+    </script>
+</body>
+</html>
