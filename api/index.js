@@ -14,12 +14,11 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
 
-// 1. Database Connection
 mongoose.connect(process.env.MONGODB_URI)
     .then(() => console.log("Connected to MongoDB"))
     .catch(err => console.error("MongoDB Connection Error:", err));
 
-// 2. Schemas
+// --- SCHEMAS ---
 const Asset = mongoose.model('Asset', new mongoose.Schema({
     name: String,
     barcode: String,
@@ -45,8 +44,7 @@ const Issue = mongoose.model('Issue', new mongoose.Schema({
 
 const TARGET_CATEGORIES = ['Video', 'Lighting', 'Sound', 'Grip'];
 
-// --- SISO LIVE SYNC LOGIC ---
-
+// --- SISO LIVE SYNC ---
 async function refreshSisoToken() {
     try {
         const response = await axios.post(`${process.env.SISO_BASE_URL}/scripts/api/v1/jwt_request`, {}, {
@@ -57,10 +55,7 @@ async function refreshSisoToken() {
             }
         });
         return response.data.token || (response.data.response && response.data.response.token);
-    } catch (e) { 
-        console.error("Token Refresh Failed");
-        return null; 
-    }
+    } catch (e) { return null; }
 }
 
 async function syncWithSiso() {
@@ -83,8 +78,6 @@ async function syncWithSiso() {
         });
 
         const allAssets = await Asset.find();
-        
-        // Update each asset based on SISO report
         for (let item of allAssets) {
             let collected = false;
             if (item.barcode) {
@@ -94,20 +87,16 @@ async function syncWithSiso() {
                 collected = true;
                 outByNameCount[item.name]--;
             }
-            
             if (item.isCollected !== collected) {
                 await Asset.updateOne({ _id: item._id }, { isCollected: collected });
             }
         }
-        console.log("SISO Sync Complete");
     } catch (e) { console.error("Sync Error", e.message); }
 }
 
-// --- API ROUTES ---
-
+// --- ROUTES ---
 app.get('/api/assets', async (req, res) => {
-    // Sync before sending assets to ensure accuracy
-    await syncWithSiso();
+    await syncWithSiso(); // Live sync before every audit start
     const assets = await Asset.find();
     res.json({ assets });
 });
@@ -119,8 +108,10 @@ app.post('/api/upload-csv', multer({ storage: multer.memoryStorage() }).single('
 
     stream.pipe(csv())
         .on('data', (data) => {
-            const category = data.Category?.trim();
-            const assetName = data['Asset Name']?.trim();
+            // FIX: Add optional chaining and null checks to prevent .trim() errors
+            const category = data.Category ? String(data.Category).trim() : "";
+            const assetName = data['Asset Name'] ? String(data['Asset Name']).trim() : "";
+            
             if (assetName && TARGET_CATEGORIES.includes(category)) {
                 const bcs = (data.Barcodes || "").split(',').map(b => b.trim()).filter(b => b !== "");
                 if (bcs.length > 0) {
@@ -131,10 +122,14 @@ app.post('/api/upload-csv', multer({ storage: multer.memoryStorage() }).single('
             }
         })
         .on('end', async () => {
-            await Asset.deleteMany({});
-            await Asset.insertMany(results);
-            await syncWithSiso();
-            res.json({ success: true });
+            try {
+                await Asset.deleteMany({});
+                await Asset.insertMany(results);
+                await syncWithSiso();
+                res.json({ success: true });
+            } catch (dbErr) {
+                res.status(500).send("Database Save Error: " + dbErr.message);
+            }
         });
 });
 
