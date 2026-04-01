@@ -2,238 +2,162 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Audit Session - KitStore</title>
-    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Live Audit | LSA</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .audit-row-item { position: relative; background-color: #1e293b; border-radius: 16px; margin-bottom: 12px; overflow: hidden; border: 1px solid #334155; padding-left: 40px; transition: opacity 0.2s; }
-        .audit-row-item::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 40px; background-color: var(--tab-color, #475569); }
-        .row-complete { opacity: 0.6; background-color: #064e3b !important; --tab-color: #059669 !important; }
-        .cat-Video { --tab-color: #a21caf; } .cat-Sound { --tab-color: #be123c; } .cat-Lighting { --tab-color: #a16207; } .cat-Grip { --tab-color: #1d4ed8; }
-        .cat-Video-bg { background-color: #a21caf; color: white; } .cat-Sound-bg { background-color: #be123c; color: white; } .cat-Lighting-bg { background-color: #a16207; color: white; } .cat-Grip-bg { background-color: #1d4ed8; color: white; }
-        .accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
-        .open .accordion-content { max-height: 5000px; }
-        .error-flash { animation: shake 0.4s; border-color: #ef4444 !important; }
-        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
-        .no-tgl { cursor: default; }
+        /* Prevents iOS zoom on input focus */
+        input { font-size: 16px !important; }
+        .scanning-active { border-color: #3b82f6; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2); }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen font-sans">
-    <div class="sticky top-0 z-50 bg-gray-900 border-b border-gray-700 p-4 flex gap-4 items-center shadow-2xl">
-        <button onclick="saveAndExit('In Progress')" class="bg-gray-800 text-white px-4 py-2 rounded-lg font-bold text-xs border border-gray-600">PAUSE</button>
-        <button onclick="saveAndExit('Completed')" class="bg-green-900/40 text-green-400 px-4 py-2 rounded-lg font-bold text-xs border border-green-500">COMPLETE</button>
-        <div class="flex-1 flex relative">
-            <input type="text" id="scanner" autofocus placeholder="SCAN BARCODE..." class="w-full p-4 bg-blue-900/20 border-2 border-blue-500 rounded-xl text-xl font-mono outline-none" onkeypress="if(event.key==='Enter') handleScan(this.value)">
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans pb-20">
+
+    <div class="sticky top-0 bg-gray-900/95 backdrop-blur-md z-50 p-4 border-b border-gray-800">
+        <div class="flex items-center justify-between mb-4">
+            <h2 id="audit-title" class="text-xl font-bold truncate mr-2">Audit Session</h2>
+            <button onclick="finishAudit()" class="bg-green-600 px-4 py-2 rounded-xl font-bold text-sm">Finish</button>
         </div>
-        <div class="text-right min-w-[80px]"><p id="total-progress" class="text-3xl font-black text-blue-400">0/0</p></div>
+
+        <div class="relative flex items-center gap-2">
+            <input type="text" id="scanner-input" 
+                   placeholder="Scan barcode..." 
+                   class="w-full bg-gray-800 border-2 border-gray-700 p-4 rounded-2xl outline-none transition-all focus:border-blue-500"
+                   autocomplete="off">
+            
+            <button onclick="handleManualSubmit()" class="bg-blue-600 p-4 rounded-2xl hover:bg-blue-700 transition-all shadow-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+            </button>
+        </div>
     </div>
-    <div id="audit-list" class="p-6 max-w-5xl mx-auto space-y-3 pb-32"></div>
+
+    <div class="grid grid-cols-2 gap-3 p-4">
+        <div class="bg-gray-800 p-4 rounded-2xl border border-gray-700">
+            <p class="text-xs font-bold text-gray-400 uppercase">Found</p>
+            <p id="found-count" class="text-3xl font-black text-blue-500">0</p>
+        </div>
+        <div class="bg-gray-800 p-4 rounded-2xl border border-gray-700">
+            <p class="text-xs font-bold text-gray-400 uppercase">SISO Out</p>
+            <p id="out-count" class="text-3xl font-black text-orange-500">0</p>
+        </div>
+    </div>
+
+    <div id="asset-list" class="px-4 space-y-3">
+        </div>
 
     <script>
-        let activeItems = []; 
-        let openNames = new Set(); 
-        let manualOverride = false;
-        let currentAuditId = null; 
-        let auditName = "";
-        const CAT_ORDER = { "Video": 1, "Sound": 2, "Lighting": 3, "Grip": 4 };
+        let assets = [];
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionName = urlParams.get('name') || 'Unnamed Audit';
+        const sessionId = Date.now().toString();
 
-        function esc(str) { 
-            if (!str) return "";
-            return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); 
+        document.getElementById('audit-title').innerText = sessionName;
+
+        // --- MOBILE OPTIMIZATION: AUTO-FOCUS LOGIC ---
+        const input = document.getElementById('scanner-input');
+
+        // 1. Keep focus on the input box at all times
+        document.addEventListener('click', () => {
+            // Only refocus if user isn't clicking another button/input
+            if (document.activeElement.tagName !== 'BUTTON' && document.activeElement.tagName !== 'INPUT') {
+                input.focus();
+            }
+        });
+
+        // 2. Handle Scanner "Enter" or Manual "Enter"
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                processScan(input.value);
+            }
+        });
+
+        function handleManualSubmit() {
+            processScan(input.value);
         }
 
-        window.onload = async () => {
-            const params = new URLSearchParams(window.location.search);
-            const resumeId = params.get('resume');
-            const newName = params.get('name');
-
-            if (resumeId) {
-                // Resume logic: Get from audit history
-                const res = await fetch('/api/history');
-                const history = await res.json();
-                const audit = history.find(a => a.id == resumeId);
-                if(audit) { 
-                    activeItems = audit.items; 
-                    currentAuditId = audit.id; 
-                    auditName = audit.name; 
-                }
-            } else if (newName) {
-                // Start New logic: Get fresh assets from Master Inventory
+        async function loadAssets() {
+            try {
                 const res = await fetch('/api/assets');
                 const data = await res.json();
-                
-                // Also check for reported issues to exclude broken items
-                const issueRes = await fetch('/api/issues');
-                const issues = await issueRes.json();
-                const badBarcodes = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
+                assets = data.assets.map(a => ({ ...a, isAudited: false }));
+                renderList();
+            } catch (err) { alert("Error loading assets"); }
+        }
 
-                activeItems = data.assets
-                    .filter(item => !badBarcodes.has(item.barcode))
-                    .map((item, idx) => ({ 
-                        ...item, 
-                        isAudited: false, 
-                        uid: 'item-' + Date.now() + '-' + idx 
-                    }));
-                
-                currentAuditId = Date.now().toString(); 
-                auditName = newName;
-            } else { 
-                window.location.href = '/'; 
+        function processScan(val) {
+            const code = val.trim().toUpperCase().replace(/^LSA/i, '');
+            if (!code) return;
+
+            const idx = assets.findIndex(a => a.barcode && a.barcode.toUpperCase().replace(/^LSA/i, '') === code);
+            
+            if (idx > -1) {
+                assets[idx].isAudited = true;
+                // Move item to top of visual list or play sound if needed
+                renderList();
+            } else {
+                alert(`Barcode ${code} not found in master list.`);
             }
-            render();
+
+            input.value = '';
+            input.focus();
+        }
+
+        function renderList() {
+            const list = document.getElementById('asset-list');
+            const foundCount = document.getElementById('found-count');
+            const outCount = document.getElementById('out-count');
+            
+            list.innerHTML = '';
+            let found = 0;
+            let out = 0;
+
+            assets.forEach(asset => {
+                if (asset.isAudited) found++;
+                if (asset.isCollected) out++;
+
+                const card = document.createElement('div');
+                card.className = `p-4 rounded-2xl border-2 transition-all ${
+                    asset.isAudited ? 'bg-blue-900/30 border-blue-500' : 'bg-gray-800 border-gray-700'
+                }`;
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-bold text-gray-500 uppercase">${asset.category}</p>
+                            <p class="font-bold text-lg">${asset.name}</p>
+                            <p class="text-sm font-mono text-gray-400">${asset.barcode || 'NO BARCODE'}</p>
+                        </div>
+                        <div class="flex flex-col items-end gap-2">
+                            ${asset.isAudited ? ' <span class="bg-blue-500 text-[10px] font-bold px-2 py-1 rounded-md uppercase">Found</span>' : ''}
+                            ${asset.isCollected ? '<span class="bg-orange-600 text-[10px] font-bold px-2 py-1 rounded-md uppercase">🛑 SISO: OUT</span>' : ''}
+                        </div>
+                    </div>
+                `;
+                list.appendChild(card);
+            });
+
+            foundCount.innerText = found;
+            outCount.innerText = out;
+        }
+
+        async function finishAudit() {
+            const status = assets.every(a => a.isAudited || a.isCollected) ? 'Complete' : 'Incomplete';
+            const body = { id: sessionId, name: sessionName, items: assets, status: status };
+            
+            await fetch('/api/save-audit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            window.location.href = '/history';
+        }
+
+        window.onload = () => {
+            loadAssets();
+            input.focus();
         };
-
-        function handleScan(val) {
-            const bc = val.trim().toUpperCase().replace(/^LSA/i, '');
-            const inputEl = document.getElementById('scanner');
-            if(!bc) return;
-
-            // SISO Check (If item is already marked as Collected/Out)
-            const sisoConflict = activeItems.find(item => item.barcode && String(item.barcode).toUpperCase().replace(/^LSA/i, '') === bc && item.isCollected);
-            if (sisoConflict) { 
-                alert("🛑 SISO: Item is marked as OUT in system."); 
-                inputEl.value = ''; 
-                return; 
-            }
-
-            let found = false;
-            activeItems.forEach(item => { 
-                const itemBc = String(item.barcode || "").toUpperCase().replace(/^LSA/i, '');
-                if (itemBc === bc && !item.isAudited && !found) { 
-                    item.isAudited = true; 
-                    found = true; 
-                    manualOverride = false; 
-                } 
-            });
-
-            if(!found) { 
-                inputEl.classList.add('error-flash'); 
-                setTimeout(() => inputEl.classList.remove('error-flash'), 400); 
-            }
-            inputEl.value = ''; 
-            render();
-        }
-
-        function bulkSetManual(assetName) {
-            const input = document.getElementById(`bulk-input-${assetName}`);
-            const targetCount = parseInt(input.value);
-            if (isNaN(targetCount)) return;
-
-            let updated = 0;
-            // Reset existing manual audits for this item name first
-            activeItems.forEach(item => {
-                if (item.name === assetName && !item.barcode) item.isAudited = false;
-            });
-            // Apply new count
-            activeItems.forEach(item => {
-                if (item.name === assetName && !item.barcode && updated < targetCount) {
-                    item.isAudited = true;
-                    updated++;
-                }
-            });
-            render();
-        }
-
-        function render() {
-            const container = document.getElementById('audit-list'); 
-            container.innerHTML = '';
-            const groups = {};
-
-            activeItems.forEach(item => {
-                if (!groups[item.name]) {
-                    groups[item.name] = { 
-                        name: item.name, 
-                        category: item.category, 
-                        total: 0, 
-                        out: 0, 
-                        audited: 0, 
-                        barcodes: [] 
-                    };
-                }
-                groups[item.name].total++;
-                if (item.isCollected) groups[item.name].out++;
-                if (item.isAudited) groups[item.name].audited++;
-                groups[item.name].barcodes.push(item);
-            });
-
-            let groupArray = Object.values(groups).map(g => {
-                const target = g.total - g.out;
-                return { ...g, target, isDone: g.audited >= target && target >= 0 };
-            }).sort((a,b) => (a.isDone - b.isDone) || (CAT_ORDER[a.category] - CAT_ORDER[b.category]));
-
-            if (!manualOverride) { 
-                const next = groupArray.find(g => !g.isDone); 
-                if(next) { openNames.clear(); openNames.add(next.name); } 
-            }
-
-            let globalAudited = 0, globalTarget = 0;
-            groupArray.forEach(g => {
-                globalAudited += g.audited; 
-                globalTarget += g.target;
-                const isOpen = openNames.has(g.name);
-                const catClass = `cat-${(g.category || 'General').replace(/\s/g, '')}`;
-                const hasManualItems = g.barcodes.some(b => !b.barcode && !b.isCollected);
-                const manualScannedCount = g.barcodes.filter(b=>!b.barcode && b.isAudited).length;
-                
-                const inStoreItems = g.barcodes.filter(b=>!b.isCollected && !b.isAudited)
-                    .sort((a, b) => (a.barcode ? -1 : 1));
-
-                const div = document.createElement('div');
-                div.className = `audit-row-item ${g.isDone ? 'row-complete' : ''} ${isOpen ? 'open' : ''} ${catClass}`;
-                
-                div.innerHTML = `
-                <div class="p-4 flex justify-between items-center cursor-pointer" onclick="toggleAccordion('${esc(g.name)}')">
-                    <div class="flex-1">
-                        <div class="flex items-center gap-3">
-                            <p class="font-bold text-lg text-white">${g.name}</p>
-                            <span class="text-[9px] px-1.5 py-0.5 rounded font-black uppercase ${catClass}-bg">${g.category}</span>
-                            ${hasManualItems ? `
-                                <div class="flex items-center gap-1 ml-2 no-tgl" onclick="event.stopPropagation()">
-                                    <input type="number" id="bulk-input-${esc(g.name)}" min="0" step="1"
-                                        class="w-12 h-7 bg-gray-800 border border-gray-600 rounded text-[11px] text-center outline-none focus:border-blue-500" 
-                                        value="${manualScannedCount}">
-                                    <button onclick="bulkSetManual('${esc(g.name)}')" class="bg-blue-600 hover:bg-blue-500 text-white text-[9px] font-black px-2 h-7 rounded uppercase transition-colors">Set</button>
-                                </div>
-                            ` : ''}
-                        </div>
-                        <span class="text-[10px] text-gray-500 uppercase font-black">Target: ${g.target} (Out: ${g.out})</span>
-                    </div>
-                    <div class="text-3xl font-black">${g.audited}/${g.target}</div>
-                </div>
-                <div class="accordion-content bg-gray-900/80 px-4 pb-4 text-xs font-mono">
-                    <div class="grid grid-cols-3 gap-4 pt-4 border-t border-gray-700">
-                        <div class="border-r border-gray-700 pr-2">
-                            <p class="text-green-500 font-bold mb-2 uppercase border-b border-green-900 text-center">Scanned</p>
-                            <ul>${g.barcodes.filter(b=>b.isAudited).map(b=>`<li class="flex justify-between py-1 text-gray-300">✅ ${b.barcode||'No Barcode'} <button onclick="unscan('${b.uid}')" class="text-red-500 font-bold px-2">✕</button></li>`).join('')||'<li class="text-gray-600 italic">None</li>'}</ul>
-                        </div>
-                        <div class="border-r border-gray-700 px-2">
-                            <p class="text-gray-500 font-bold mb-2 uppercase border-b border-gray-800 text-center">In-Store</p>
-                            <ul>${inStoreItems.map(b=>`<li class="flex justify-between py-1 text-gray-300">📦 ${b.barcode||'No Barcode'} ${!b.barcode ? `<button onclick="manualTick('${b.uid}')" class="bg-blue-600 text-white px-2 rounded font-bold ml-1">TICK</button>` : ''}</li>`).join('')||'<li class="text-gray-600 italic">None</li>'}</ul>
-                        </div>
-                        <div class="pl-2">
-                            <p class="text-red-500 font-bold mb-2 uppercase border-b border-red-900 text-center">SISO-Out</p>
-                            <ul>${g.barcodes.filter(b=>b.isCollected).map(b=>`<li class="py-1 text-gray-300">📡 ${b.barcode||'No Barcode'}</li>`).join('')||'<li class="text-gray-600 italic">None</li>'}</ul>
-                        </div>
-                    </div>
-                </div>`;
-                container.appendChild(div);
-            });
-            document.getElementById('total-progress').innerText = `${globalAudited}/${globalTarget}`;
-        }
-
-        function toggleAccordion(n) { manualOverride = true; if(openNames.has(n)) openNames.delete(n); else { openNames.clear(); openNames.add(n); } render(); }
-        function manualTick(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=true; render(); } }
-        function unscan(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=false; render(); } }
-        
-        async function saveAndExit(s) { 
-            const res = await fetch('/api/save-audit', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ id: currentAuditId, name: auditName, items: activeItems, status: s }) 
-            }); 
-            if(res.ok) window.location.href = '/';
-            else alert("Error saving session. Check your connection.");
-        }
     </script>
 </body>
 </html>
