@@ -65,7 +65,7 @@ app.post('/api/upload-csv', upload.single('csvFile'), async (req, res) => {
 
         stream.pipe(csv())
             .on('data', (data) => {
-                // Mapping: Handles headers "Asset" or "name", etc.
+                // Mapping: Handles headers "Asset", "Barcode", "Category"
                 results.push({
                     name: data.Asset || data.name || data.Item,
                     barcode: data.Barcode || data.barcode || "NONE",
