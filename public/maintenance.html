@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><title>Maintenance - KitStore</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 p-8">
+    <div class="max-w-6xl mx-auto">
+        <a href="/" class="mb-8 inline-block text-blue-400 font-bold tracking-widest">← BACK TO HOME</a>
+        <h2 class="text-4xl font-black mb-8 text-red-500">Report Issue</h2>
+        
+        <div class="bg-gray-800 p-6 rounded-2xl space-y-6 border border-gray-700 mb-12">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Item Name</label>
+                    <select id="issue-item-name" class="w-full p-4 bg-gray-900 rounded-xl border border-gray-600 outline-none" onchange="updateBarcodes()"></select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Barcode</label>
+                    <select id="issue-barcode" class="w-full p-4 bg-gray-900 rounded-xl border border-gray-600 outline-none"></select>
+                </div>
+            </div>
+            <div class="flex gap-4">
+                <button id="btn-Broken" onclick="setType('Broken', this)" class="type-btn flex-1 py-4 rounded-xl border border-gray-600 font-bold transition-all">Broken</button>
+                <button id="btn-Missing" onclick="setType('Missing', this)" class="type-btn flex-1 py-4 rounded-xl border border-gray-600 font-bold transition-all">Missing</button>
+            </div>
+            <textarea id="issue-notes" placeholder="Notes..." class="w-full p-4 bg-gray-900 rounded-xl border border-gray-600 h-20 outline-none"></textarea>
+            <button onclick="submitIssue()" class="w-full bg-red-600 py-4 rounded-xl font-bold text-xl hover:bg-red-700 transition-all">Submit Report</button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div>
+                <h3 class="text-xl font-black mb-4 text-yellow-500 uppercase tracking-widest border-b border-yellow-900/50 pb-2">Broken Items</h3>
+                <div id="list-broken" class="space-y-3"></div>
+            </div>
+
+            <div>
+                <h3 class="text-xl font-black mb-4 text-red-600 uppercase tracking-widest border-b border-red-900/50 pb-2">Missing Items</h3>
+                <div id="list-missing" class="space-y-3"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let assets = []; let selectedType = "";
+
+        window.onload = async () => { 
+            const res = await fetch('/api/assets'); 
+            const data = await res.json(); 
+            assets = data.assets;
+            const dropdown = document.getElementById('issue-item-name');
+            dropdown.innerHTML = '<option value="">-- Select Asset --</option>';
+            [...new Set(assets.map(a=>a.name))].sort().forEach(n => dropdown.innerHTML += `<option value="${n}">${n}</option>`);
+            loadIssues();
+        };
+
+        function updateBarcodes() {
+            const name = document.getElementById('issue-item-name').value;
+            const bcDropdown = document.getElementById('issue-barcode');
+            bcDropdown.innerHTML = '<option value="NONE">No Barcode</option>';
+            assets.filter(a => a.name === name && a.barcode).forEach(a => bcDropdown.innerHTML += `<option value="${a.barcode}">${a.barcode}</option>`);
+        }
+
+        function setType(t, btn) { 
+            selectedType = t; 
+            document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('bg-yellow-600','bg-red-600','text-white', 'border-transparent'));
+            btn.classList.add(t==='Broken'?'bg-yellow-600':'bg-red-600', 'text-white', 'border-transparent');
+        }
+
+        async function submitIssue() {
+            const item = document.getElementById('issue-item-name').value;
+            const barcode = document.getElementById('issue-barcode').value;
+            const notes = document.getElementById('issue-notes').value;
+            if(!item || !selectedType) return alert("Select item and type");
+
+            // The server adds the timestamp, but we can pass one here if needed. 
+            // Our server.js logic already adds i.timestamp: new Date().toLocaleString()
+            await fetch('/api/log-issue', { 
+                method:'POST', 
+                headers:{'Content-Type':'application/json'}, 
+                body: JSON.stringify({item, barcode, type:selectedType, notes})
+            });
+            location.reload();
+        }
+
+        async function loadIssues() {
+            const res = await fetch('/api/issues'); 
+            const data = await res.json();
+            const reversedData = data.reverse();
+
+            const brokenList = document.getElementById('list-broken');
+            const missingList = document.getElementById('list-missing');
+
+            const renderCard = (i) => `
+                <div class="p-4 rounded-xl border-l-4 flex justify-between items-start ${i.type==='Broken'?'bg-yellow-900/20 border-yellow-500':'bg-red-900/20 border-red-600'}">
+                    <div class="flex-1">
+                        <div class="flex justify-between items-start mb-1">
+                            <p class="font-bold text-white leading-tight">${i.item}</p>
+                            <span class="text-[9px] font-mono text-gray-500 whitespace-nowrap ml-2">${i.timestamp || ''}</span>
+                        </div>
+                        <p class="text-[10px] font-mono text-gray-400 uppercase">${i.barcode !== 'NONE' ? i.barcode : 'No Barcode'}</p>
+                        ${i.notes ? `<p class="text-xs text-gray-300 mt-2 italic bg-black/20 p-2 rounded">"${i.notes}"</p>` : ''}
+                    </div>
+                    <button onclick="deleteIssue(${i.id})" class="text-gray-600 hover:text-red-500 font-bold transition-colors pl-4 pt-1">✕</button>
+                </div>`;
+
+            brokenList.innerHTML = reversedData.filter(i => i.type === 'Broken').map(renderCard).join('') || '<p class="text-gray-600 text-sm italic">No broken items reported.</p>';
+            missingList.innerHTML = reversedData.filter(i => i.type === 'Missing').map(renderCard).join('') || '<p class="text-gray-600 text-sm italic">No missing items reported.</p>';
+        }
+
+        async function deleteIssue(id) { 
+            if(confirm("Are you sure you want to delete this report?")) { 
+                await fetch(`/api/issues/${id}`,{method:'DELETE'}); 
+                loadIssues(); 
+            } 
+        }
+    </script>
+</body>
+</html>

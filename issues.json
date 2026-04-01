@@ -1,0 +1,18 @@
+[
+  {
+    "item": "12-24mm",
+    "barcode": "LSA5713",
+    "type": "Missing",
+    "notes": "Missing by Max",
+    "id": 1774974454916,
+    "timestamp": "31/03/2026, 17:27:34"
+  },
+  {
+    "item": "12-24mm",
+    "barcode": "LSA6101",
+    "type": "Broken",
+    "notes": "Not Working, on Maintenance Shelf",
+    "id": 1774974482244,
+    "timestamp": "31/03/2026, 17:28:02"
+  }
+]
