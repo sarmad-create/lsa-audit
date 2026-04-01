@@ -8,21 +8,21 @@
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col items-center justify-center font-sans">
-    <div class="flex flex-col items-center space-y-8 w-full max-w-md px-6">
-        <img src="/LSA Side White Neg.png" alt="LSA Logo" class="w-64 h-auto object-contain">
-        <h1 class="text-6xl font-black text-blue-500 tracking-tighter">KITSTORE AUDIT</h1>
+    <div class="flex flex-col items-center space-y-8 w-full max-w-md px-6 text-center">
+        <img src="/LSA Side White Neg.png" alt="LSA Logo" class="w-64 h-auto object-contain mb-2">
+        <h1 class="text-6xl font-black text-blue-500 tracking-tighter leading-none">KITSTORE<br>AUDIT</h1>
         
-        <div class="w-full space-y-4">
-            <div class="space-y-2">
+        <div class="w-full space-y-4 pt-4">
+            <div class="space-y-2 text-left">
                 <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">Session Name</label>
-                <input type="text" id="session-name" placeholder="e.g. KS_AUDIT_01042026" class="w-full bg-gray-800 border-2 border-gray-700 p-4 rounded-2xl text-lg outline-none focus:border-blue-500 transition-all">
+                <input type="text" id="session-name" placeholder="e.g. KS_AUDIT_APRIL" class="w-full bg-gray-800 border-2 border-gray-700 p-4 rounded-2xl text-lg outline-none focus:border-blue-500 transition-all">
             </div>
             
             <button onclick="startAudit()" class="w-full bg-blue-600 py-6 rounded-2xl text-2xl font-bold shadow-xl hover:bg-blue-700 transition-all">Start Audit</button>
             <a href="/history" class="block w-full bg-gray-800 py-6 rounded-2xl text-center text-2xl font-bold hover:bg-gray-700 transition-all">Resume / Past Audits</a>
             <a href="/maintenance" class="block w-full bg-red-900/40 border-2 border-red-500 py-6 rounded-2xl text-center text-xl font-bold text-red-400 hover:bg-red-900/60 transition-all">Broken / Missing Items</a>
             
-            <button onclick="document.getElementById('csv-input').click()" class="w-full bg-gray-700/50 border border-gray-600 py-3 rounded-xl text-xs font-bold text-gray-400 hover:bg-gray-700 transition-all uppercase tracking-widest">Update Master CSV</button>
+            <button id="csv-btn" onclick="document.getElementById('csv-input').click()" class="w-full bg-gray-700/50 border border-gray-600 py-3 rounded-xl text-xs font-bold text-gray-400 hover:bg-gray-700 transition-all uppercase tracking-widest">Update Master CSV</button>
             <input type="file" id="csv-input" class="hidden" accept=".csv" onchange="uploadCSV(this)">
         </div>
     </div>
@@ -37,20 +37,35 @@
         async function uploadCSV(input) {
             const file = input.files[0];
             if (!file) return;
+
+            const btn = document.getElementById('csv-btn');
+            const originalText = btn.innerText;
+            
+            // Visual feedback
+            btn.innerText = "UPLOADING & SYNCING...";
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+
             const formData = new FormData();
-            // Name must be 'csv' to match index.js
             formData.append('csv', file);
+
             try {
                 const res = await fetch('/api/upload-csv', { method: 'POST', body: formData });
                 if (res.ok) {
                     const data = await res.json();
-                    alert(`Success! Imported ${data.count} items.`);
+                    alert(`Success! Imported ${data.count} items and updated SISO statuses.`);
                 } else {
                     const error = await res.text();
                     alert("Upload failed: " + error);
                 }
-            } catch (err) { alert("Server error: " + err.message); }
-            input.value = '';
+            } catch (err) {
+                alert("Server error: " + err.message);
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                input.value = '';
+            }
         }
     </script>
 </body>
