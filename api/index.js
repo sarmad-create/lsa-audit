@@ -40,22 +40,23 @@ const Issue = mongoose.model('Issue', IssueSchema);
 const storage = multer.memoryStorage();
 const upload = multer({ 
     storage: storage,
-    limits: { fileSize: 4.5 * 1024 * 1024 } // Vercel limit is 4.5MB
+    limits: { fileSize: 4.5 * 1024 * 1024 } 
 });
 
 // --- API ROUTES ---
 
-// Get all assets
+// Get all assets - Critical for dropdowns and audits
 app.get('/api/assets', async (req, res) => {
     try {
         const assets = await Asset.find();
+        // Return exactly what the frontend expects: { assets: [...] }
         res.json({ assets });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// CSV Upload Route (Wipes old inventory and replaces with new)
+// CSV Upload Route
 app.post('/api/upload-csv', upload.single('csvFile'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).send('No file uploaded.');
@@ -65,22 +66,21 @@ app.post('/api/upload-csv', upload.single('csvFile'), async (req, res) => {
 
         stream.pipe(csv())
             .on('data', (data) => {
-                // Mapping: Handles headers "Asset", "Barcode", "Category"
+                // Mapping CSV headers to Database fields
                 results.push({
-                    name: data.Asset || data.name || data.Item,
+                    name: data.Asset || data.name || data.Item || "Unknown Item",
                     barcode: data.Barcode || data.barcode || "NONE",
                     category: data.Category || data.category || "General",
                     isCollected: false
                 });
             })
             .on('end', async () => {
-                if(results.length === 0) return res.status(400).send('CSV is empty or incorrectly formatted.');
+                if(results.length === 0) return res.status(400).send('CSV is empty.');
                 await Asset.deleteMany({});
                 await Asset.insertMany(results);
                 res.json({ success: true, count: results.length });
             });
     } catch (error) {
-        console.error("Upload Error:", error);
         res.status(500).send('Upload failed: ' + error.message);
     }
 });
@@ -103,6 +103,7 @@ app.post('/api/log-issue', async (req, res) => {
 
 app.delete('/api/issues/:id', async (req, res) => {
     try {
+        // Use MongoDB's _id for deletion
         await Issue.findByIdAndDelete(req.params.id);
         res.json({ success: true });
     } catch (err) { res.status(500).send(err.message); }
