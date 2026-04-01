@@ -14,11 +14,12 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
 
+// 1. DATABASE CONNECTION
 mongoose.connect(process.env.MONGODB_URI)
     .then(() => console.log("Connected to MongoDB"))
     .catch(err => console.error("MongoDB Connection Error:", err));
 
-// --- SCHEMAS ---
+// 2. DATA MODELS (SCHEMAS)
 const Asset = mongoose.model('Asset', new mongoose.Schema({
     name: String,
     barcode: String,
@@ -44,7 +45,7 @@ const Issue = mongoose.model('Issue', new mongoose.Schema({
 
 const TARGET_CATEGORIES = ['Video', 'Lighting', 'Sound', 'Grip'];
 
-// --- SISO LIVE SYNC ---
+// 3. SISO SYNC LOGIC (From original server.js)
 async function refreshSisoToken() {
     try {
         const response = await axios.post(`${process.env.SISO_BASE_URL}/scripts/api/v1/jwt_request`, {}, {
@@ -55,7 +56,10 @@ async function refreshSisoToken() {
             }
         });
         return response.data.token || (response.data.response && response.data.response.token);
-    } catch (e) { return null; }
+    } catch (e) { 
+        console.error("SISO Token Error");
+        return null; 
+    }
 }
 
 async function syncWithSiso() {
@@ -70,6 +74,7 @@ async function syncWithSiso() {
         const outBarcodes = new Set();
         const outByNameCount = {};
 
+        // Parse out current SISO "Out" items
         reportData.forEach(row => {
             const bc = row.barcode ? String(row.barcode).trim().toUpperCase().replace(/^LSA/i, '') : null;
             const name = row.assetname ? row.assetname.trim() : null;
@@ -78,6 +83,8 @@ async function syncWithSiso() {
         });
 
         const allAssets = await Asset.find();
+        
+        // Update local database status based on SISO report
         for (let item of allAssets) {
             let collected = false;
             if (item.barcode) {
@@ -87,32 +94,43 @@ async function syncWithSiso() {
                 collected = true;
                 outByNameCount[item.name]--;
             }
+            
+            // Only update if the status changed to save database calls
             if (item.isCollected !== collected) {
                 await Asset.updateOne({ _id: item._id }, { isCollected: collected });
             }
         }
-    } catch (e) { console.error("Sync Error", e.message); }
+    } catch (e) { console.error("SISO Sync Error:", e.message); }
 }
 
-// --- ROUTES ---
+// 4. API ROUTES
+
+// Fetch all assets (triggers a live SISO sync first)
 app.get('/api/assets', async (req, res) => {
-    await syncWithSiso(); // Live sync before every audit start
+    await syncWithSiso(); 
     const assets = await Asset.find();
     res.json({ assets });
 });
 
+// Defensive CSV Upload Route
 app.post('/api/upload-csv', multer({ storage: multer.memoryStorage() }).single('csv'), async (req, res) => {
     if (!req.file) return res.status(400).send('No file.');
+    
     const results = [];
     const stream = Readable.from(req.file.buffer);
 
     stream.pipe(csv())
         .on('data', (data) => {
-            // FIX: Add optional chaining and null checks to prevent .trim() errors
-            const category = data.Category ? String(data.Category).trim() : "";
-            const assetName = data['Asset Name'] ? String(data['Asset Name']).trim() : "";
+            // Check for both 'Category' and 'Category' variations [cite: 129]
+            const rawCat = data['Category'] || data['category'];
+            const rawName = data['Asset Name'] || data['assetname'];
+            
+            // Defensive string conversion to prevent .trim() crashes
+            const category = rawCat ? String(rawCat).trim() : "";
+            const assetName = rawName ? String(rawName).trim() : "";
             
             if (assetName && TARGET_CATEGORIES.includes(category)) {
+                // Parse multiple barcodes if they exist [cite: 129]
                 const bcs = (data.Barcodes || "").split(',').map(b => b.trim()).filter(b => b !== "");
                 if (bcs.length > 0) {
                     bcs.forEach(bc => results.push({ category, name: assetName, barcode: bc }));
@@ -126,13 +144,14 @@ app.post('/api/upload-csv', multer({ storage: multer.memoryStorage() }).single('
                 await Asset.deleteMany({});
                 await Asset.insertMany(results);
                 await syncWithSiso();
-                res.json({ success: true });
-            } catch (dbErr) {
-                res.status(500).send("Database Save Error: " + dbErr.message);
+                res.json({ success: true, count: results.length });
+            } catch (err) {
+                res.status(500).send("DB Error: " + err.message);
             }
         });
 });
 
+// Audit History Routes
 app.get('/api/history', async (req, res) => {
     const history = await Audit.find().sort({ _id: -1 });
     res.json(history);
@@ -144,6 +163,12 @@ app.post('/api/save-audit', async (req, res) => {
     res.json({ success: true });
 });
 
+app.delete('/api/history/:id', async (req, res) => {
+    await Audit.findOneAndDelete({ id: req.params.id });
+    res.json({ success: true });
+});
+
+// Issue Log Routes
 app.get('/api/issues', async (req, res) => {
     const issues = await Issue.find().sort({ _id: -1 });
     res.json(issues);
