@@ -22,7 +22,7 @@
             <a href="/history" class="block w-full bg-gray-800 py-6 rounded-2xl text-center text-2xl font-bold hover:bg-gray-700 transition-all">Resume / Past Audits</a>
             <a href="/maintenance" class="block w-full bg-red-900/40 border-2 border-red-500 py-6 rounded-2xl text-center text-xl font-bold text-red-400 hover:bg-red-900/60 transition-all">Broken / Missing Items</a>
             
-            <button onclick="document.getElementById('csv-input').click()" id="csv-btn" class="w-full bg-gray-700/50 border border-gray-600 py-3 rounded-xl text-xs font-bold text-gray-400 hover:bg-gray-700 transition-all uppercase tracking-widest">Update Master CSV</button>
+            <button onclick="document.getElementById('csv-input').click()" class="w-full bg-gray-700/50 border border-gray-600 py-3 rounded-xl text-xs font-bold text-gray-400 hover:bg-gray-700 transition-all uppercase tracking-widest">Update Master CSV</button>
             <input type="file" id="csv-input" class="hidden" accept=".csv" onchange="uploadCSV(this)">
         </div>
     </div>
@@ -31,35 +31,26 @@
         function startAudit() {
             const name = document.getElementById('session-name').value.trim();
             if(!name) return alert("Please enter a session name.");
-            window.location.href = `/audit.html?name=${encodeURIComponent(name)}`;
+            window.location.href = `/audit?name=${encodeURIComponent(name)}`;
         }
 
         async function uploadCSV(input) {
-    const file = input.files[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    // This name 'csv' MUST match index.js
-    formData.append('csv', file); 
-
-    try {
-        const res = await fetch('/api/upload-csv', { 
-            method: 'POST', 
-            body: formData 
-        });
-        
-        if (res.ok) {
-            const data = await res.json();
-            alert(`Success! Imported ${data.count} items.`);
-        } else {
-            const errorText = await res.text();
-            alert("Upload failed: " + errorText);
-        }
-    } catch (err) {
-        alert("Server error: " + err.message);
-    }
-    input.value = ''; // Reset input
-}
+            const file = input.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            // Name must be 'csv' to match index.js
+            formData.append('csv', file);
+            try {
+                const res = await fetch('/api/upload-csv', { method: 'POST', body: formData });
+                if (res.ok) {
+                    const data = await res.json();
+                    alert(`Success! Imported ${data.count} items.`);
+                } else {
+                    const error = await res.text();
+                    alert("Upload failed: " + error);
+                }
+            } catch (err) { alert("Server error: " + err.message); }
+            input.value = '';
         }
     </script>
 </body>
