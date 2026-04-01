@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const csv = require('csv-parser');
 const { Readable } = require('stream');
+const axios = require('axios');
 const dotenv = require('dotenv');
 const cors = require('cors');
 
@@ -10,119 +11,152 @@ dotenv.config();
 const app = express();
 
 app.use(cors());
-// Fixed PayloadTooLargeError for high item counts
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
 
+// 1. Database Connection
 mongoose.connect(process.env.MONGODB_URI)
     .then(() => console.log("Connected to MongoDB"))
     .catch(err => console.error("MongoDB Connection Error:", err));
 
-// --- SCHEMAS ---
-
-const AssetSchema = new mongoose.Schema({
+// 2. Schemas
+const Asset = mongoose.model('Asset', new mongoose.Schema({
     name: String,
     barcode: String,
     category: String,
     isCollected: { type: Boolean, default: false }
-});
-const Asset = mongoose.model('Asset', AssetSchema);
+}));
 
-const IssueSchema = new mongoose.Schema({
+const Audit = mongoose.model('Audit', new mongoose.Schema({
+    id: String,
+    name: String,
+    status: String,
+    items: Array,
+    timestamp: String
+}));
+
+const Issue = mongoose.model('Issue', new mongoose.Schema({
     item: String,
     barcode: String,
     type: String,
     notes: String,
-    timestamp: { type: String, default: () => new Date().toLocaleString() }
-});
-const Issue = mongoose.model('Issue', IssueSchema);
+    timestamp: String
+}));
 
-const AuditSchema = new mongoose.Schema({
-    id: String, // Matching your Date.now() logic
-    name: String,
-    status: String, // 'In Progress' or 'Completed'
-    items: Array,   // Stores the activeItems array
-    date: { type: String, default: () => new Date().toLocaleString() }
-});
-const Audit = mongoose.model('Audit', AuditSchema);
+const TARGET_CATEGORIES = ['Video', 'Lighting', 'Sound', 'Grip'];
 
-// --- MULTER ---
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage, limits: { fileSize: 10 * 1024 * 1024 } });
+// --- SISO LIVE SYNC LOGIC ---
+
+async function refreshSisoToken() {
+    try {
+        const response = await axios.post(`${process.env.SISO_BASE_URL}/scripts/api/v1/jwt_request`, {}, {
+            headers: { 
+                'accept': 'application/json', 
+                'authtoken': process.env.SISO_AUTH_TOKEN, 
+                'authkey': process.env.SISO_AUTH_KEY 
+            }
+        });
+        return response.data.token || (response.data.response && response.data.response.token);
+    } catch (e) { 
+        console.error("Token Refresh Failed");
+        return null; 
+    }
+}
+
+async function syncWithSiso() {
+    const token = await refreshSisoToken();
+    if (!token) return;
+    try {
+        const res = await axios.post(`${process.env.SISO_BASE_URL}/scripts/api/v1/report`, 
+        { report_uuid: "af3779f4-5ad1-453e-b1c3-cb34b7d5cc80" }, 
+        { headers: { 'Authorization': `Bearer ${token}` } });
+        
+        const reportData = res.data.response?.results || [];
+        const outBarcodes = new Set();
+        const outByNameCount = {};
+
+        reportData.forEach(row => {
+            const bc = row.barcode ? String(row.barcode).trim().toUpperCase().replace(/^LSA/i, '') : null;
+            const name = row.assetname ? row.assetname.trim() : null;
+            if (bc) outBarcodes.add(bc);
+            else if (name) outByNameCount[name] = (outByNameCount[name] || 0) + 1;
+        });
+
+        const allAssets = await Asset.find();
+        
+        // Update each asset based on SISO report
+        for (let item of allAssets) {
+            let collected = false;
+            if (item.barcode) {
+                const cleanBC = String(item.barcode).replace(/^LSA/i, '').trim().toUpperCase();
+                collected = outBarcodes.has(cleanBC);
+            } else if (outByNameCount[item.name] > 0) {
+                collected = true;
+                outByNameCount[item.name]--;
+            }
+            
+            if (item.isCollected !== collected) {
+                await Asset.updateOne({ _id: item._id }, { isCollected: collected });
+            }
+        }
+        console.log("SISO Sync Complete");
+    } catch (e) { console.error("Sync Error", e.message); }
+}
 
 // --- API ROUTES ---
 
-// Asset list for starting new audits
 app.get('/api/assets', async (req, res) => {
-    try {
-        const assets = await Asset.find();
-        res.json({ assets });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    // Sync before sending assets to ensure accuracy
+    await syncWithSiso();
+    const assets = await Asset.find();
+    res.json({ assets });
 });
 
-// CSV Upload (Matching your "All Resources" headers)
-app.post('/api/upload-csv', upload.single('csvFile'), async (req, res) => {
-    try {
-        if (!req.file) return res.status(400).send('No file uploaded.');
-        const results = [];
-        const allowedCategories = ['Video', 'Sound', 'Lighting', 'Grip'];
-        const stream = Readable.from(req.file.buffer);
+app.post('/api/upload-csv', multer({ storage: multer.memoryStorage() }).single('csv'), async (req, res) => {
+    if (!req.file) return res.status(400).send('No file.');
+    const results = [];
+    const stream = Readable.from(req.file.buffer);
 
-        stream.pipe(csv())
-            .on('data', (data) => {
-                const name = data['Asset Name'];
-                const barcode = data['Barcodes'];
-                const category = data['Category'];
-                // Only import specific categories
-                if (name && allowedCategories.includes(category)) {
-                    results.push({
-                        name: name.trim(),
-                        barcode: barcode ? barcode.trim() : "",
-                        category: category.trim(),
-                        isCollected: data['Active'] === 'No' // Example: mapping "Active: No" to Collected
-                    });
+    stream.pipe(csv())
+        .on('data', (data) => {
+            const category = data.Category?.trim();
+            const assetName = data['Asset Name']?.trim();
+            if (assetName && TARGET_CATEGORIES.includes(category)) {
+                const bcs = (data.Barcodes || "").split(',').map(b => b.trim()).filter(b => b !== "");
+                if (bcs.length > 0) {
+                    bcs.forEach(bc => results.push({ category, name: assetName, barcode: bc }));
+                } else {
+                    results.push({ category, name: assetName, barcode: null });
                 }
-            })
-            .on('end', async () => {
-                await Asset.deleteMany({});
-                await Asset.insertMany(results);
-                res.json({ success: true, count: results.length });
-            });
-    } catch (error) { res.status(500).send('Upload failed: ' + error.message); }
+            }
+        })
+        .on('end', async () => {
+            await Asset.deleteMany({});
+            await Asset.insertMany(results);
+            await syncWithSiso();
+            res.json({ success: true });
+        });
 });
 
-// Save Audit (Used by PAUSE and COMPLETE buttons)
-app.post('/api/save-audit', async (req, res) => {
-    try {
-        const { id, name, items, status } = req.body;
-        // Upsert logic: Update if ID exists, create if not
-        await Audit.findOneAndUpdate(
-            { id: id },
-            { name, items, status, date: new Date().toLocaleString() },
-            { upsert: true }
-        );
-        res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// History endpoint (Matches window.onload fetch in your HTML)
 app.get('/api/history', async (req, res) => {
-    try {
-        const history = await Audit.find().sort({ _id: -1 });
-        res.json(history);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    const history = await Audit.find().sort({ _id: -1 });
+    res.json(history);
 });
 
-// Issue tracking
+app.post('/api/save-audit', async (req, res) => {
+    const session = { ...req.body, timestamp: new Date().toLocaleString() };
+    await Audit.findOneAndUpdate({ id: session.id }, session, { upsert: true });
+    res.json({ success: true });
+});
+
 app.get('/api/issues', async (req, res) => {
     const issues = await Issue.find().sort({ _id: -1 });
     res.json(issues);
 });
 
 app.post('/api/log-issue', async (req, res) => {
-    const newIssue = new Issue(req.body);
-    await newIssue.save();
+    const issue = { ...req.body, timestamp: new Date().toLocaleString() };
+    await Issue.create(issue);
     res.json({ success: true });
 });
 
