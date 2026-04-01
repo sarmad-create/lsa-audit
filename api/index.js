@@ -45,42 +45,51 @@ const upload = multer({
 
 // --- API ROUTES ---
 
-// Get all assets - Critical for dropdowns and audits
+// Get all assets
 app.get('/api/assets', async (req, res) => {
     try {
         const assets = await Asset.find();
-        // Return exactly what the frontend expects: { assets: [...] }
         res.json({ assets });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// CSV Upload Route
+// CSV Upload Route with specific Filtering and Mapping
 app.post('/api/upload-csv', upload.single('csvFile'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).send('No file uploaded.');
 
         const results = [];
+        const allowedCategories = ['Video', 'Sound', 'Lighting', 'Grip'];
         const stream = Readable.from(req.file.buffer);
 
         stream.pipe(csv())
             .on('data', (data) => {
-                // Mapping CSV headers to Database fields
-                results.push({
-                    name: data.Asset || data.name || data.Item || "Unknown Item",
-                    barcode: data.Barcode || data.barcode || "NONE",
-                    category: data.Category || data.category || "General",
-                    isCollected: false
-                });
+                // Exact Mapping based on "All Resources (2).csv" headers
+                const name = data['Asset Name'] || data.Asset || data.name;
+                const barcode = data['Barcodes'] || data.Barcode || data.barcode;
+                const category = data['Category'] || data.category;
+
+                // Only process if Category is in your allowed list
+                if (name && allowedCategories.includes(category)) {
+                    results.push({
+                        name: name.trim(),
+                        barcode: barcode ? barcode.trim() : "NONE",
+                        category: category.trim(),
+                        isCollected: false
+                    });
+                }
             })
             .on('end', async () => {
-                if(results.length === 0) return res.status(400).send('CSV is empty.');
+                if(results.length === 0) return res.status(400).send('No matching items found in CSV (Check categories: Video, Sound, Lighting, Grip).');
+                
                 await Asset.deleteMany({});
                 await Asset.insertMany(results);
                 res.json({ success: true, count: results.length });
             });
     } catch (error) {
+        console.error("Upload Error:", error);
         res.status(500).send('Upload failed: ' + error.message);
     }
 });
@@ -103,7 +112,6 @@ app.post('/api/log-issue', async (req, res) => {
 
 app.delete('/api/issues/:id', async (req, res) => {
     try {
-        // Use MongoDB's _id for deletion
         await Issue.findByIdAndDelete(req.params.id);
         res.json({ success: true });
     } catch (err) { res.status(500).send(err.message); }
