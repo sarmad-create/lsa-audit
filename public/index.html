@@ -1,51 +1,39 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LSA Kitstore Audit App</title>
-    <link rel="icon" type="image/x-icon" href="/favicon.ico">
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col items-center justify-center font-sans">
-    <div class="flex flex-col items-center space-y-8 w-full max-w-md px-6">
-        <img src="/LSA Side White Neg.png" alt="LSA Logo" class="w-64 h-auto object-contain">
-        <h1 class="text-6xl font-black text-blue-500 tracking-tighter">KITSTORE AUDIT</h1>
-        
-        <div class="w-full space-y-4">
-            <div class="space-y-2">
-                <label class="block text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">Session Name</label>
-                <input type="text" id="session-name" placeholder="e.g. KS_AUDIT_01042026" class="w-full bg-gray-800 border-2 border-gray-700 p-4 rounded-2xl text-lg outline-none focus:border-blue-500 transition-all">
-            </div>
-            
-            <button onclick="startAudit()" class="w-full bg-blue-600 py-6 rounded-2xl text-2xl font-bold shadow-xl hover:bg-blue-700 transition-all">Start Audit</button>
-            <a href="/history" class="block w-full bg-gray-800 py-6 rounded-2xl text-center text-2xl font-bold hover:bg-gray-700 transition-all">Resume / Past Audits</a>
-            <a href="/maintenance" class="block w-full bg-red-900/40 border-2 border-red-500 py-6 rounded-2xl text-center text-xl font-bold text-red-400 hover:bg-red-900/60 transition-all">Broken / Missing Items</a>
-            
-            <button onclick="document.getElementById('csv-input').click()" class="w-full bg-gray-700/50 border border-gray-600 py-3 rounded-xl text-xs font-bold text-gray-400 hover:bg-gray-700 transition-all uppercase tracking-widest">Update Master CSV</button>
-            <input type="file" id="csv-input" class="hidden" accept=".csv" onchange="uploadCSV(this)">
-        </div>
-    </div>
+async function updateMasterCSV() {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.csv';
+    
+    fileInput.onchange = async () => {
+        const file = fileInput.files[0];
+        if (!file) return;
 
-    <script>
-        function startAudit() {
-            const name = document.getElementById('session-name').value.trim();
-            if(!name) return alert("Please enter a session name.");
-            window.location.href = `/audit?name=${encodeURIComponent(name)}`;
-        }
+        const formData = new FormData();
+        formData.append('csvFile', file); // This key must match upload.single('csvFile')
 
-        async function uploadCSV(input) {
-            const file = input.files[0];
-            if (!file) return;
-            const formData = new FormData();
-            formData.append('csv', file);
-            try {
-                const res = await fetch('/api/upload-csv', { method: 'POST', body: formData });
-                if (res.ok) alert("CSV Uploaded Successfully!");
-                else alert("Upload failed.");
-            } catch (err) { alert("Server error."); }
-            input.value = '';
+        const btn = document.querySelector('button[onclick="updateMasterCSV()"]');
+        const originalText = btn.innerText;
+        btn.innerText = "UPLOADING...";
+        btn.disabled = true;
+
+        try {
+            const res = await fetch('/api/upload-csv', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (res.ok) {
+                alert("Master Inventory Updated Successfully!");
+            } else {
+                const errText = await res.text();
+                alert("Upload Failed: " + errText);
+            }
+        } catch (err) {
+            alert("Error: " + err.message);
+        } finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
         }
-    </script>
-</body>
-</html>
+    };
+    
+    fileInput.click();
+}
