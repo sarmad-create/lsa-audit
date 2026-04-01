@@ -4,6 +4,18 @@
     {
       "source": "/api/:path*",
       "destination": "/api/index.js"
+    },
+    {
+      "source": "/audit",
+      "destination": "/audit.html"
+    },
+    {
+      "source": "/maintenance",
+      "destination": "/maintenance.html"
+    },
+    {
+      "source": "/history",
+      "destination": "/history.html"
     }
   ]
 }
