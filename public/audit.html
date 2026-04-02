@@ -17,7 +17,6 @@
         .error-flash { animation: shake 0.4s; border-color: #ef4444 !important; }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
         .no-tgl { cursor: default; }
-        /* Mobile specific fixes */
         input#scanner { font-size: 16px !important; }
         body { -webkit-tap-highlight-color: transparent; }
     </style>
@@ -59,15 +58,30 @@
             return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); 
         }
 
+        // AUTO-FOCUS LOGIC
+        function keepFocus() {
+            const scanner = document.getElementById('scanner');
+            if (document.activeElement !== scanner) {
+                scanner.focus();
+            }
+        }
+
         window.onload = async () => {
             const params = new URLSearchParams(window.location.search);
             const resumeId = params.get('resume');
             const newName = params.get('name');
 
-            // Force focus on click
+            // 1. Reclaim focus whenever user taps the screen
+            document.addEventListener('touchstart', (e) => {
+                if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
+                    setTimeout(keepFocus, 10);
+                }
+            }, {passive: true});
+
+            // 2. Reclaim focus when user clicks (for non-touch testing)
             document.addEventListener('click', (e) => {
                 if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
-                    document.getElementById('scanner').focus();
+                    keepFocus();
                 }
             });
 
@@ -101,6 +115,7 @@
                 window.location.href = '/'; 
             }
             render();
+            document.getElementById('scanner').focus();
         };
 
         function handleScan(val) {
@@ -112,6 +127,7 @@
             if (sisoConflict) { 
                 alert("🛑 SISO: Item is OUT"); 
                 inputEl.value = ''; 
+                setTimeout(keepFocus, 50);
                 return; 
             }
 
@@ -129,9 +145,11 @@
                 inputEl.classList.add('error-flash'); 
                 setTimeout(() => inputEl.classList.remove('error-flash'), 400); 
             }
+            
             inputEl.value = ''; 
             render();
-            inputEl.focus();
+            // Critical: Force keyboard focus back immediately after processing scan
+            setTimeout(keepFocus, 50);
         }
 
         function bulkSetManual(assetName) {
@@ -150,6 +168,7 @@
                 }
             });
             render();
+            setTimeout(keepFocus, 50);
         }
 
         function render() {
@@ -237,9 +256,9 @@
             document.getElementById('total-progress').innerText = `${globalAudited}/${globalTarget}`;
         }
 
-        function toggleAccordion(n) { manualOverride = true; if(openNames.has(n)) openNames.delete(n); else { openNames.clear(); openNames.add(n); } render(); }
-        function manualTick(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=true; render(); } }
-        function unscan(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=false; render(); } }
+        function toggleAccordion(n) { manualOverride = true; if(openNames.has(n)) openNames.delete(n); else { openNames.clear(); openNames.add(n); } render(); setTimeout(keepFocus, 10); }
+        function manualTick(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=true; render(); setTimeout(keepFocus, 10); } }
+        function unscan(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=false; render(); setTimeout(keepFocus, 10); } }
         
         async function saveAndExit(s) { 
             const res = await fetch('/api/save-audit', { 
