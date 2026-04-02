@@ -62,18 +62,19 @@
                 const badB = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
 
                 activeItems = aData.assets.filter(item => {
-                    const cls = item.Class || item.class || "";
-                    const isKit = cls.includes('Kit');
-                    const isPkg = cls.includes('Package');
-                    const isHeader = cls.includes('Header');
-                    const hasCat = item.category || item.Category;
+                    const name = (item['Asset Name'] || item.name || "").toLowerCase();
+                    const cls = (item.Class || item.class || "").toLowerCase();
                     
-                    return !badB.has(item.barcode || item.Barcodes) && !isKit && !isPkg && !isHeader && hasCat;
+                    const isKitOrHeader = cls.includes('kit') || cls.includes('header') || cls.includes('package');
+                    const isHiddenItem = name.includes('transmitter') || name.includes('dedo');
+                    const hasCat = item.Category || item.category;
+
+                    return !badB.has(item.Barcodes || item.barcode) && !isKitOrHeader && !isHiddenItem && hasCat;
                 }).map((item, idx) => ({ 
                     ...item, 
-                    name: item.name || item['Asset Name'],
-                    barcode: item.barcode || item.Barcodes,
-                    category: item.category || item.Category,
+                    name: item['Asset Name'] || item.name,
+                    barcode: item.Barcodes || item.barcode,
+                    category: item.Category || item.category,
                     isAudited: false, 
                     uid: 'item-' + Date.now() + '-' + idx 
                 }));
