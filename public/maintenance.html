@@ -1,48 +1,53 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"><title>Maintenance - KitStore</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Maintenance - KitStore</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Prevent zoom on focus and keep text readable at smaller scale */
+        input, select, textarea { font-size: 14px !important; }
+        .log-card { min-height: 60px; }
+    </style>
 </head>
-<body class="bg-gray-900 text-gray-100 p-8">
+<body class="bg-gray-900 text-gray-100 p-4 md:p-8">
     <div class="max-w-6xl mx-auto">
-        <a href="/" class="mb-8 inline-block text-blue-400 font-bold tracking-widest">← BACK TO HOME</a>
-        <h2 class="text-4xl font-black mb-8 text-red-500">Report Issue</h2>
+        <div class="flex justify-between items-center mb-4">
+            <a href="/" class="text-blue-400 font-bold tracking-widest text-xs">← BACK</a>
+            <h2 class="text-2xl font-black text-red-500 uppercase">Maintenance</h2>
+        </div>
         
-        <div class="bg-gray-800 p-6 rounded-2xl space-y-6 border border-gray-700 mb-12">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><label class="block text-xs font-bold text-gray-400 uppercase mb-2">Item Name</label><select id="issue-item-name" class="w-full p-4 bg-gray-900 rounded-xl border border-gray-600 outline-none" onchange="updateBarcodes()"></select></div>
-                <div><label class="block text-xs font-bold text-gray-400 uppercase mb-2">Barcode</label><select id="issue-barcode" class="w-full p-4 bg-gray-900 rounded-xl border border-gray-600 outline-none"></select></div>
+        <div class="bg-gray-800 p-4 rounded-xl space-y-4 border border-gray-700 mb-8 shadow-lg">
+            <div class="grid grid-cols-2 gap-3">
+                <div><label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Item Name</label><select id="issue-item-name" class="w-full p-3 bg-gray-900 rounded-lg border border-gray-600 outline-none" onchange="updateBarcodes()"></select></div>
+                <div><label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Barcode</label><select id="issue-barcode" class="w-full p-3 bg-gray-900 rounded-lg border border-gray-600 outline-none"></select></div>
             </div>
-            <div>
-                <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Issue Type</label>
-                <div class="flex gap-4">
-                    <button onclick="setType('Broken')" id="btn-broken" class="flex-1 py-4 rounded-xl border-2 border-transparent bg-gray-700 font-bold">BROKEN</button>
-                    <button onclick="setType('Missing')" id="btn-missing" class="flex-1 py-4 rounded-xl border-2 border-transparent bg-gray-700 font-bold">MISSING</button>
-                </div>
+            <div class="flex gap-3">
+                <button onclick="setType('Broken')" id="btn-broken" class="flex-1 py-3 rounded-lg border-2 border-transparent bg-gray-700 font-bold text-xs">BROKEN</button>
+                <button onclick="setType('Missing')" id="btn-missing" class="flex-1 py-3 rounded-lg border-2 border-transparent bg-gray-700 font-bold text-xs">MISSING</button>
             </div>
-            <div><label class="block text-xs font-bold text-gray-400 uppercase mb-2">Notes</label><textarea id="issue-notes" class="w-full p-4 bg-gray-900 rounded-xl border border-gray-600 outline-none h-24" placeholder="Describe the issue..."></textarea></div>
-            <button onclick="submitIssue()" class="w-full bg-red-600 hover:bg-red-500 py-6 rounded-2xl text-2xl font-black transition-all">LOG ISSUE</button>
+            <div><textarea id="issue-notes" class="w-full p-3 bg-gray-900 rounded-lg border border-gray-600 outline-none h-16 text-sm" placeholder="Short notes..."></textarea></div>
+            <button onclick="submitIssue()" class="w-full bg-red-600 hover:bg-red-500 py-3 rounded-xl text-lg font-black transition-all">LOG ISSUE</button>
         </div>
 
-        <div class="flex justify-between items-end mb-6">
-            <h2 class="text-4xl font-black text-white">Logged Issues</h2>
-            <div class="w-full max-w-sm">
-                <input type="text" id="issue-search" placeholder="Search logs..." onkeyup="filterIssues()" 
+        <div class="mb-6">
+            <div class="relative">
+                <input type="text" id="issue-search" placeholder="Search logs by name or barcode..." onkeyup="filterIssues()" 
                     class="w-full p-3 bg-gray-800 border border-gray-700 rounded-xl outline-none focus:border-blue-500 text-sm">
             </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div class="space-y-4">
-                <h3 class="text-xs font-black text-yellow-500 uppercase tracking-widest border-b border-yellow-900/50 pb-2">Broken Items</h3>
-                <div id="broken-list" class="space-y-3"></div>
+        <div class="grid grid-cols-2 gap-3 md:gap-8">
+            <div class="space-y-3">
+                <h3 class="text-[10px] font-black text-yellow-500 uppercase tracking-widest border-b border-yellow-900/50 pb-1">Broken</h3>
+                <div id="broken-list" class="space-y-2"></div>
             </div>
 
-            <div class="space-y-4">
-                <h3 class="text-xs font-black text-red-500 uppercase tracking-widest border-b border-red-900/50 pb-2">Missing Items</h3>
-                <div id="missing-list" class="space-y-3"></div>
+            <div class="space-y-3">
+                <h3 class="text-[10px] font-black text-red-500 uppercase tracking-widest border-b border-red-900/50 pb-1">Missing</h3>
+                <div id="missing-list" class="space-y-2"></div>
             </div>
         </div>
     </div>
@@ -58,7 +63,7 @@
             allAssets = assetData.assets;
             
             const uniqueNames = [...new Set(allAssets.map(a => a.name))].sort();
-            document.getElementById('issue-item-name').innerHTML = `<option value="">Select an item...</option>` + uniqueNames.map(n => `<option value="${n}">${n}</option>`).join('');
+            document.getElementById('issue-item-name').innerHTML = `<option value="">Select Item...</option>` + uniqueNames.map(n => `<option value="${n}">${n}</option>`).join('');
             
             loadIssues();
         };
@@ -66,13 +71,13 @@
         function updateBarcodes() {
             const name = document.getElementById('issue-item-name').value;
             const barcodes = allAssets.filter(a => a.name === name).map(a => a.barcode).filter(b => b);
-            document.getElementById('issue-barcode').innerHTML = `<option value="NONE text-gray-500">No Barcode / General</option>` + barcodes.map(b => `<option value="${b}">${b}</option>`).join('');
+            document.getElementById('issue-barcode').innerHTML = `<option value="NONE">General / No BC</option>` + barcodes.map(b => `<option value="${b}">${b}</option>`).join('');
         }
 
         function setType(t) {
             selectedType = t;
-            document.getElementById('btn-broken').className = `flex-1 py-4 rounded-xl border-2 font-bold ${t==='Broken'?'border-yellow-500 bg-yellow-900/20 text-yellow-500':'border-transparent bg-gray-700'}`;
-            document.getElementById('btn-missing').className = `flex-1 py-4 rounded-xl border-2 font-bold ${t==='Missing'?'border-red-500 bg-red-900/20 text-red-500':'border-transparent bg-gray-700'}`;
+            document.getElementById('btn-broken').className = `flex-1 py-3 rounded-lg border-2 font-bold text-xs ${t==='Broken'?'border-yellow-500 bg-yellow-900/20 text-yellow-500':'border-transparent bg-gray-700'}`;
+            document.getElementById('btn-missing').className = `flex-1 py-3 rounded-lg border-2 font-bold text-xs ${t==='Missing'?'border-red-500 bg-red-900/20 text-red-500':'border-transparent bg-gray-700'}`;
         }
 
         async function submitIssue() {
@@ -102,19 +107,19 @@
             const brokenHtml = issues.filter(i => i.type === 'Broken').map(i => renderCard(i)).join('');
             const missingHtml = issues.filter(i => i.type === 'Missing').map(i => renderCard(i)).join('');
 
-            brokenContainer.innerHTML = brokenHtml || '<p class="text-gray-600 italic text-xs">No broken items logged.</p>';
-            missingContainer.innerHTML = missingHtml || '<p class="text-gray-600 italic text-xs">No missing items logged.</p>';
+            brokenContainer.innerHTML = brokenHtml || '<p class="text-gray-700 italic text-[10px]">None</p>';
+            missingContainer.innerHTML = missingHtml || '<p class="text-gray-700 italic text-[10px]">None</p>';
         }
 
         function renderCard(i) {
             return `
-                <div class="p-4 rounded-xl border-l-4 flex justify-between items-center bg-gray-800/50 border-gray-700 hover:bg-gray-800 transition-all ${i.type === 'Broken' ? 'border-yellow-500' : 'border-red-600'}">
-                    <div>
-                        <p class="font-bold text-white text-sm">${i.item} <span class="text-[10px] text-gray-500 ml-1">${i.barcode !== 'NONE' ? i.barcode : 'NO BC'}</span></p>
-                        <p class="text-xs text-gray-400 mt-1">${i.notes || 'No notes'}</p>
-                        <p class="text-[8px] text-gray-600 uppercase mt-2 font-bold tracking-tighter">${i.timestamp || ''}</p>
+                <div class="log-card p-2 rounded-lg border-l-2 flex justify-between items-start bg-gray-800/40 border-gray-700 hover:bg-gray-800 transition-all ${i.type === 'Broken' ? 'border-yellow-500' : 'border-red-600'}">
+                    <div class="overflow-hidden">
+                        <p class="font-bold text-white text-[11px] leading-tight truncate">${i.item}</p>
+                        <p class="text-[9px] text-gray-500 font-mono">${i.barcode !== 'NONE' ? i.barcode : 'NO BC'}</p>
+                        <p class="text-[9px] text-gray-400 mt-1 line-clamp-2">${i.notes || ''}</p>
                     </div>
-                    <button onclick="deleteIssue('${i._id}')" class="text-gray-600 hover:text-red-500 font-bold px-2 transition-colors">✕</button>
+                    <button onclick="deleteIssue('${i._id}')" class="text-gray-600 hover:text-red-500 font-bold pl-1 text-xs">✕</button>
                 </div>`;
         }
 
@@ -122,14 +127,13 @@
             const query = document.getElementById('issue-search').value.toLowerCase();
             const filtered = currentIssues.filter(i => 
                 i.item.toLowerCase().includes(query) || 
-                (i.barcode && i.barcode.toLowerCase().includes(query)) ||
-                i.type.toLowerCase().includes(query)
+                (i.barcode && i.barcode.toLowerCase().includes(query))
             );
             renderLists(filtered);
         }
 
         async function deleteIssue(id) {
-            if(!confirm("Delete this log?")) return;
+            if(!confirm("Delete log?")) return;
             await fetch(`/api/issues/${id}`, { method: 'DELETE' });
             loadIssues();
         }
