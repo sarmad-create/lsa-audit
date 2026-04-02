@@ -7,7 +7,6 @@
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Prevent zoom on focus and keep text readable at smaller scale */
         input, select, textarea { font-size: 14px !important; }
         .log-card { min-height: 60px; }
     </style>
@@ -21,8 +20,14 @@
         
         <div class="bg-gray-800 p-4 rounded-xl space-y-4 border border-gray-700 mb-8 shadow-lg">
             <div class="grid grid-cols-2 gap-3">
-                <div><label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Item Name</label><select id="issue-item-name" class="w-full p-3 bg-gray-900 rounded-lg border border-gray-600 outline-none" onchange="updateBarcodes()"></select></div>
-                <div><label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Barcode</label><select id="issue-barcode" class="w-full p-3 bg-gray-900 rounded-lg border border-gray-600 outline-none"></select></div>
+                <div>
+                    <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Item Name</label>
+                    <select id="issue-item-name" class="w-full p-3 bg-gray-900 rounded-lg border border-gray-600 outline-none" onchange="updateBarcodes()"></select>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Barcode</label>
+                    <select id="issue-barcode" class="w-full p-3 bg-gray-900 rounded-lg border border-gray-600 outline-none"></select>
+                </div>
             </div>
             <div class="flex gap-3">
                 <button onclick="setType('Broken')" id="btn-broken" class="flex-1 py-3 rounded-lg border-2 border-transparent bg-gray-700 font-bold text-xs">BROKEN</button>
@@ -33,10 +38,8 @@
         </div>
 
         <div class="mb-6">
-            <div class="relative">
-                <input type="text" id="issue-search" placeholder="Search logs by name or barcode..." onkeyup="filterIssues()" 
-                    class="w-full p-3 bg-gray-800 border border-gray-700 rounded-xl outline-none focus:border-blue-500 text-sm">
-            </div>
+            <input type="text" id="issue-search" placeholder="Search logs..." onkeyup="filterIssues()" 
+                class="w-full p-3 bg-gray-800 border border-gray-700 rounded-xl outline-none focus:border-blue-500 text-sm">
         </div>
 
         <div class="grid grid-cols-2 gap-3 md:gap-8">
@@ -44,7 +47,6 @@
                 <h3 class="text-[10px] font-black text-yellow-500 uppercase tracking-widest border-b border-yellow-900/50 pb-1">Broken</h3>
                 <div id="broken-list" class="space-y-2"></div>
             </div>
-
             <div class="space-y-3">
                 <h3 class="text-[10px] font-black text-red-500 uppercase tracking-widest border-b border-red-900/50 pb-1">Missing</h3>
                 <div id="missing-list" class="space-y-2"></div>
@@ -57,13 +59,26 @@
         let selectedType = '';
         let currentIssues = [];
 
+        // Helper to escape punctuation for JS strings
+        function esc(str) { 
+            if (!str) return "";
+            return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); 
+        }
+
         window.onload = async () => {
             const assetRes = await fetch('/api/assets');
             const assetData = await assetRes.json();
             allAssets = assetData.assets;
             
             const uniqueNames = [...new Set(allAssets.map(a => a.name))].sort();
-            document.getElementById('issue-item-name').innerHTML = `<option value="">Select Item...</option>` + uniqueNames.map(n => `<option value="${n}">${n}</option>`).join('');
+            const select = document.getElementById('issue-item-name');
+            select.innerHTML = `<option value="">Select Item...</option>`;
+            uniqueNames.forEach(n => {
+                let opt = document.createElement('option');
+                opt.value = n; // Browser handles punctuation in .value automatically
+                opt.textContent = n;
+                select.appendChild(opt);
+            });
             
             loadIssues();
         };
@@ -71,7 +86,14 @@
         function updateBarcodes() {
             const name = document.getElementById('issue-item-name').value;
             const barcodes = allAssets.filter(a => a.name === name).map(a => a.barcode).filter(b => b);
-            document.getElementById('issue-barcode').innerHTML = `<option value="NONE">General / No BC</option>` + barcodes.map(b => `<option value="${b}">${b}</option>`).join('');
+            const bcSelect = document.getElementById('issue-barcode');
+            bcSelect.innerHTML = `<option value="NONE">General / No BC</option>`;
+            barcodes.forEach(b => {
+                let opt = document.createElement('option');
+                opt.value = b;
+                opt.textContent = b;
+                bcSelect.appendChild(opt);
+            });
         }
 
         function setType(t) {
@@ -104,11 +126,8 @@
             const brokenContainer = document.getElementById('broken-list');
             const missingContainer = document.getElementById('missing-list');
             
-            const brokenHtml = issues.filter(i => i.type === 'Broken').map(i => renderCard(i)).join('');
-            const missingHtml = issues.filter(i => i.type === 'Missing').map(i => renderCard(i)).join('');
-
-            brokenContainer.innerHTML = brokenHtml || '<p class="text-gray-700 italic text-[10px]">None</p>';
-            missingContainer.innerHTML = missingHtml || '<p class="text-gray-700 italic text-[10px]">None</p>';
+            brokenContainer.innerHTML = issues.filter(i => i.type === 'Broken').map(i => renderCard(i)).join('') || '<p class="text-gray-700 italic text-[10px]">None</p>';
+            missingContainer.innerHTML = issues.filter(i => i.type === 'Missing').map(i => renderCard(i)).join('') || '<p class="text-gray-700 italic text-[10px]">None</p>';
         }
 
         function renderCard(i) {
