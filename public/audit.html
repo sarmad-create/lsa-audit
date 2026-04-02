@@ -62,13 +62,21 @@
                 const badB = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
 
                 activeItems = aData.assets.filter(item => {
-                    // FILTER: Check "Class" column to ignore Kit rows and Family Headers
-                    const isKitRelated = item.class && item.class.includes('Kit');
-                    const isHeader = item.class && item.class.includes('Header');
-                    const hasCat = item.category && item.category !== "";
+                    const cls = item.Class || item.class || "";
+                    const isKit = cls.includes('Kit');
+                    const isPkg = cls.includes('Package');
+                    const isHeader = cls.includes('Header');
+                    const hasCat = item.category || item.Category;
                     
-                    return !badB.has(item.barcode) && !isKitRelated && !isHeader && hasCat;
-                }).map((item, idx) => ({ ...item, isAudited: false, uid: 'item-' + Date.now() + '-' + idx }));
+                    return !badB.has(item.barcode || item.Barcodes) && !isKit && !isPkg && !isHeader && hasCat;
+                }).map((item, idx) => ({ 
+                    ...item, 
+                    name: item.name || item['Asset Name'],
+                    barcode: item.barcode || item.Barcodes,
+                    category: item.category || item.Category,
+                    isAudited: false, 
+                    uid: 'item-' + Date.now() + '-' + idx 
+                }));
                 currentAuditId = Date.now().toString(); auditName = newN;
             } else { window.location.href = '/'; }
             render();
