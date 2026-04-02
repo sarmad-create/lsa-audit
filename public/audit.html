@@ -62,9 +62,9 @@
                 const badB = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
 
                 activeItems = aData.assets.filter(item => {
-                    const isNotKit = item.assetType !== '1';
+                    const isKit = item.class === 'Kit Item' || item.class === 'Kit Header';
                     const hasCat = item.category && item.category !== "";
-                    return !badB.has(item.barcode) && isNotKit && hasCat;
+                    return !badB.has(item.barcode) && !isKit && hasCat;
                 }).map((item, idx) => ({ ...item, isAudited: false, uid: 'item-' + Date.now() + '-' + idx }));
                 currentAuditId = Date.now().toString(); auditName = newN;
             } else { window.location.href = '/'; }

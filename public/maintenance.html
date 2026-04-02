@@ -63,8 +63,12 @@
             const assetRes = await fetch('/api/assets');
             const assetData = await assetRes.json();
             
-            // FILTER: Remove Kit Items (Type 1) and Uncategorized
-            allAssets = assetData.assets.filter(a => a.assetType !== '1' && a.category);
+            // FILTER: Check "Class" column to exclude Kit Item and Kit Header
+            allAssets = assetData.assets.filter(a => 
+                a.class !== 'Kit Item' && 
+                a.class !== 'Kit Header' && 
+                a.category
+            );
             
             const uniqueNames = [...new Set(allAssets.map(a => a.name))].sort();
             const select = document.getElementById('issue-item-name');
