@@ -63,11 +63,9 @@
             const assetRes = await fetch('/api/assets');
             const assetData = await assetRes.json();
             
-            // FILTER: Check "Class" column to exclude Kit Item and Kit Header
+            // FILTER: Remove anything containing "Kit" in the Class column
             allAssets = assetData.assets.filter(a => 
-                a.class !== 'Kit Item' && 
-                a.class !== 'Kit Header' && 
-                a.category
+                a.class && !a.class.includes('Kit') && a.category
             );
             
             const uniqueNames = [...new Set(allAssets.map(a => a.name))].sort();
