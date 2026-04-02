@@ -7,8 +7,8 @@
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .audit-row-item { position: relative; background-color: #1e293b; border-radius: 16px; margin-bottom: 12px; overflow: hidden; border: 1px solid #334155; padding-left: 40px; transition: opacity 0.2s; }
-        .audit-row-item::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 40px; background-color: var(--tab-color, #475569); }
+        .audit-row-item { position: relative; background-color: #1e293b; border-radius: 12px; margin-bottom: 8px; overflow: hidden; border: 1px solid #334155; padding-left: 30px; transition: opacity 0.2s; }
+        .audit-row-item::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 30px; background-color: var(--tab-color, #475569); }
         .row-complete { opacity: 0.6; background-color: #064e3b !important; --tab-color: #059669 !important; }
         .cat-Video { --tab-color: #a21caf; } .cat-Sound { --tab-color: #be123c; } .cat-Lighting { --tab-color: #a16207; } .cat-Grip { --tab-color: #1d4ed8; }
         .cat-Video-bg { background-color: #a21caf; color: white; } .cat-Sound-bg { background-color: #be123c; color: white; } .cat-Lighting-bg { background-color: #a16207; color: white; } .cat-Grip-bg { background-color: #1d4ed8; color: white; }
@@ -17,27 +17,34 @@
         .error-flash { animation: shake 0.4s; border-color: #ef4444 !important; }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
         .no-tgl { cursor: default; }
-        /* Prevent mobile zoom on focus */
+        /* Mobile specific fixes */
         input#scanner { font-size: 16px !important; }
+        body { -webkit-tap-highlight-color: transparent; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen font-sans">
-    <div class="sticky top-0 z-50 bg-gray-900 border-b border-gray-700 p-4 flex gap-4 items-center shadow-2xl">
-        <button onclick="saveAndExit('In Progress')" class="bg-gray-800 text-white px-4 py-2 rounded-lg font-bold text-xs border border-gray-600">PAUSE</button>
-        <button onclick="saveAndExit('Completed')" class="bg-green-900/40 text-green-400 px-4 py-2 rounded-lg font-bold text-xs border border-green-500">COMPLETE</button>
+    <div class="sticky top-0 z-50 bg-gray-900 border-b border-gray-700 p-2 flex gap-2 items-center shadow-2xl">
+        <div class="flex flex-col gap-1">
+            <button onclick="saveAndExit('In Progress')" class="bg-gray-800 text-white px-2 py-1.5 rounded-lg font-bold text-[10px] border border-gray-600 uppercase">Pause</button>
+            <button onclick="saveAndExit('Completed')" class="bg-green-900/40 text-green-400 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-green-500 uppercase">Done</button>
+        </div>
         
         <div class="flex-1 flex relative items-center">
-            <input type="text" id="scanner" autofocus placeholder="SCAN BARCODE..." class="w-full p-4 bg-blue-900/20 border-2 border-blue-500 rounded-xl text-xl font-mono outline-none pr-14" onkeypress="if(event.key==='Enter') handleScan(this.value)">
-            <button onclick="handleScan(document.getElementById('scanner').value)" class="absolute right-2 p-2 bg-blue-600 rounded-lg hover:bg-blue-500 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <input type="text" id="scanner" autofocus placeholder="SCAN..." class="w-full p-3 bg-blue-900/20 border-2 border-blue-500 rounded-xl text-lg font-mono outline-none pr-12" onkeypress="if(event.key==='Enter') handleScan(this.value)">
+            <button onclick="handleScan(document.getElementById('scanner').value)" class="absolute right-1.5 p-2 bg-blue-600 rounded-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
             </button>
         </div>
         
-        <div class="text-right min-w-[80px]"><p id="total-progress" class="text-3xl font-black text-blue-400">0/0</p></div>
+        <div class="text-right min-w-[60px]">
+            <p id="total-progress" class="text-xl font-black text-blue-400 leading-none">0/0</p>
+            <span class="text-[8px] text-gray-500 font-bold uppercase">Items</span>
+        </div>
     </div>
-    <div id="audit-list" class="p-6 max-w-5xl mx-auto space-y-3 pb-32"></div>
+
+    <div id="audit-list" class="p-3 max-w-5xl mx-auto space-y-2 pb-32"></div>
 
     <script>
         let activeItems = []; 
@@ -57,10 +64,9 @@
             const resumeId = params.get('resume');
             const newName = params.get('name');
 
-            // --- Mobile Scanner Logic: Always Focus ---
+            // Force focus on click
             document.addEventListener('click', (e) => {
-                // If clicking anywhere that isn't a button or another input, focus the scanner
-                if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'A') {
+                if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
                     document.getElementById('scanner').focus();
                 }
             });
@@ -104,7 +110,7 @@
 
             const sisoConflict = activeItems.find(item => item.barcode && String(item.barcode).toUpperCase().replace(/^LSA/i, '') === bc && item.isCollected);
             if (sisoConflict) { 
-                alert("🛑 SISO: Item is marked as OUT in system."); 
+                alert("🛑 SISO: Item is OUT"); 
                 inputEl.value = ''; 
                 return; 
             }
@@ -125,7 +131,7 @@
             }
             inputEl.value = ''; 
             render();
-            inputEl.focus(); // Keep focus after manual arrow click
+            inputEl.focus();
         }
 
         function bulkSetManual(assetName) {
@@ -187,44 +193,42 @@
                 const hasManualItems = g.barcodes.some(b => !b.barcode && !b.isCollected);
                 const manualScannedCount = g.barcodes.filter(b=>!b.barcode && b.isAudited).length;
                 
-                const inStoreItems = g.barcodes.filter(b=>!b.isCollected && !b.isAudited)
-                    .sort((a, b) => (a.barcode ? -1 : 1));
-
                 const div = document.createElement('div');
                 div.className = `audit-row-item ${g.isDone ? 'row-complete' : ''} ${isOpen ? 'open' : ''} ${catClass}`;
                 
                 div.innerHTML = `
-                <div class="p-4 flex justify-between items-center cursor-pointer" onclick="toggleAccordion('${esc(g.name)}')">
+                <div class="p-3 flex justify-between items-center cursor-pointer" onclick="toggleAccordion('${esc(g.name)}')">
                     <div class="flex-1">
-                        <div class="flex items-center gap-3">
-                            <p class="font-bold text-lg text-white">${g.name}</p>
-                            <span class="text-[9px] px-1.5 py-0.5 rounded font-black uppercase ${catClass}-bg">${g.category}</span>
-                            ${hasManualItems ? `
-                                <div class="flex items-center gap-1 ml-2 no-tgl" onclick="event.stopPropagation()">
-                                    <input type="number" id="bulk-input-${esc(g.name)}" min="0" step="1"
-                                        class="w-12 h-7 bg-gray-800 border border-gray-600 rounded text-[11px] text-center outline-none focus:border-blue-500" 
-                                        value="${manualScannedCount}">
-                                    <button onclick="bulkSetManual('${esc(g.name)}')" class="bg-blue-600 hover:bg-blue-500 text-white text-[9px] font-black px-2 h-7 rounded uppercase transition-colors">Set</button>
-                                </div>
-                            ` : ''}
+                        <div class="flex items-center gap-2">
+                            <p class="font-bold text-sm text-white">${g.name}</p>
+                            <span class="text-[7px] px-1 py-0.5 rounded font-black uppercase ${catClass}-bg">${g.category}</span>
                         </div>
-                        <span class="text-[10px] text-gray-500 uppercase font-black">Target: ${g.target} (Out: ${g.out})</span>
+                        <span class="text-[8px] text-gray-500 uppercase font-black">Target: ${g.target} (Out: ${g.out})</span>
                     </div>
-                    <div class="text-3xl font-black">${g.audited}/${g.target}</div>
+                    <div class="text-xl font-black">${g.audited}/${g.target}</div>
                 </div>
-                <div class="accordion-content bg-gray-900/80 px-4 pb-4 text-xs font-mono">
-                    <div class="grid grid-cols-3 gap-4 pt-4 border-t border-gray-700">
-                        <div class="border-r border-gray-700 pr-2">
-                            <p class="text-green-500 font-bold mb-2 uppercase border-b border-green-900 text-center">Scanned</p>
-                            <ul>${g.barcodes.filter(b=>b.isAudited).map(b=>`<li class="flex justify-between py-1 text-gray-300">✅ ${b.barcode||'No Barcode'} <button onclick="unscan('${b.uid}')" class="text-red-500 font-bold px-2">✕</button></li>`).join('')||'<li class="text-gray-600 italic">None</li>'}</ul>
+                <div class="accordion-content bg-gray-900/80 px-2 pb-2 text-[10px] font-mono">
+                    ${hasManualItems ? `
+                        <div class="flex items-center gap-2 mb-3 bg-gray-800 p-2 rounded-lg no-tgl" onclick="event.stopPropagation()">
+                            <span class="text-[9px] font-bold text-gray-400">NON-BARCODED QTY:</span>
+                            <input type="number" id="bulk-input-${esc(g.name)}" min="0"
+                                class="w-12 h-8 bg-gray-700 border border-gray-600 rounded text-center outline-none" 
+                                value="${manualScannedCount}">
+                            <button onclick="bulkSetManual('${esc(g.name)}')" class="bg-blue-600 px-3 h-8 rounded font-black uppercase">Set</button>
                         </div>
-                        <div class="border-r border-gray-700 px-2">
-                            <p class="text-gray-500 font-bold mb-2 uppercase border-b border-gray-800 text-center">In-Store</p>
-                            <ul>${inStoreItems.map(b=>`<li class="flex justify-between py-1 text-gray-300">📦 ${b.barcode||'No Barcode'} ${!b.barcode ? `<button onclick="manualTick('${b.uid}')" class="bg-blue-600 text-white px-2 rounded font-bold ml-1">TICK</button>` : ''}</li>`).join('')||'<li class="text-gray-600 italic">None</li>'}</ul>
+                    ` : ''}
+                    <div class="grid grid-cols-3 gap-2 pt-2 border-t border-gray-700">
+                        <div>
+                            <p class="text-green-500 font-bold mb-1 uppercase text-[8px] text-center">Scanned</p>
+                            <ul>${g.barcodes.filter(b=>b.isAudited).map(b=>`<li class="flex justify-between items-center mb-1 text-gray-300">✅ ${b.barcode||'No BC'} <button onclick="unscan('${b.uid}')" class="text-red-500 font-bold px-1 text-xs">✕</button></li>`).join('')||'<li class="text-gray-600 italic">None</li>'}</ul>
                         </div>
-                        <div class="pl-2">
-                            <p class="text-red-500 font-bold mb-2 uppercase border-b border-red-900 text-center">SISO-Out</p>
-                            <ul>${g.barcodes.filter(b=>b.isCollected).map(b=>`<li class="py-1 text-gray-300">📡 ${b.barcode||'No Barcode'}</li>`).join('')||'<li class="text-gray-600 italic">None</li>'}</ul>
+                        <div>
+                            <p class="text-gray-500 font-bold mb-1 uppercase text-[8px] text-center">In-Store</p>
+                            <ul>${g.barcodes.filter(b=>!b.isCollected && !b.isAudited).map(b=>`<li class="flex justify-between items-center mb-1 text-gray-400">📦 ${b.barcode||'No BC'} ${!b.barcode ? `<button onclick="manualTick('${b.uid}')" class="bg-blue-600 text-[8px] px-1 rounded font-bold">TICK</button>` : ''}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                        </div>
+                        <div>
+                            <p class="text-red-500 font-bold mb-1 uppercase text-[8px] text-center">SISO-Out</p>
+                            <ul>${g.barcodes.filter(b=>b.isCollected).map(b=>`<li class="mb-1 text-gray-500 text-[9px]">📡 ${b.barcode||'No BC'}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
                         </div>
                     </div>
                 </div>`;
@@ -244,7 +248,7 @@
                 body: JSON.stringify({ id: currentAuditId, name: auditName, items: activeItems, status: s }) 
             }); 
             if(res.ok) window.location.href = '/';
-            else alert("Error saving session. Check your connection.");
+            else alert("Error saving session.");
         }
     </script>
 </body>
