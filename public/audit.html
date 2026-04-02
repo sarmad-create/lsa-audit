@@ -14,8 +14,6 @@
         .cat-Video-bg { background-color: #a21caf; color: white; } .cat-Sound-bg { background-color: #be123c; color: white; } .cat-Lighting-bg { background-color: #a16207; color: white; } .cat-Grip-bg { background-color: #1d4ed8; color: white; }
         .accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
         .open .accordion-content { max-height: 5000px; }
-        .error-flash { animation: shake 0.4s; border-color: #ef4444 !important; }
-        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
         input#scanner { font-size: 16px !important; }
     </style>
 </head>
@@ -58,16 +56,17 @@
                 const badB = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
 
                 activeItems = aData.assets.filter(item => {
-                    const cls = (item.Class || "").toLowerCase();
-                    const name = (item['Asset Name'] || "").toLowerCase();
-                    const isKit = cls.includes('kit') || cls.includes('header') || cls.includes('package');
-                    const isHidden = name.includes('transmitter') || name.includes('dedo');
-                    return !badB.has(item.Barcodes) && !isKit && !isHidden && item.Category;
+                    const itemClass = (item.Class || item.class || "").toLowerCase();
+                    const isKit = itemClass.includes('kit');
+                    const isHeader = itemClass.includes('header');
+                    const hasCat = item.Category || item.category;
+
+                    return !badB.has(item.Barcodes || item.barcode) && !isKit && !isHeader && hasCat;
                 }).map((item, idx) => ({ 
                     ...item, 
-                    name: item['Asset Name'],
-                    barcode: item.Barcodes,
-                    category: item.Category,
+                    name: item['Asset Name'] || item.name,
+                    barcode: item.Barcodes || item.barcode,
+                    category: item.Category || item.category,
                     isAudited: false, 
                     uid: 'item-' + Date.now() + '-' + idx 
                 }));
@@ -106,10 +105,10 @@
                 gAud += g.audited; gTarg += g.total;
                 const isOpen = openNames.has(g.name);
                 const div = document.createElement('div');
-                div.className = `audit-row-item ${g.audited >= g.total ? 'row-complete' : ''} ${isOpen ? 'open' : ''} cat-${g.category.replace(/\s/g, '')}`;
+                div.className = `audit-row-item ${g.audited >= g.total ? 'row-complete' : ''} ${isOpen ? 'open' : ''} cat-${(g.category || 'General').replace(/\s/g, '')}`;
                 div.innerHTML = `<div class="p-3 flex justify-between items-center cursor-pointer" onclick="toggleAccordion('${esc(g.name)}')">
                     <div class="flex-1"><p class="font-bold text-sm text-white">${g.name}</p>
-                    <span class="text-[7px] px-1 py-0.5 rounded font-black uppercase cat-${g.category.replace(/\s/g, '')}-bg">${g.category}</span></div>
+                    <span class="text-[7px] px-1 py-0.5 rounded font-black uppercase cat-${(g.category || 'General').replace(/\s/g, '')}-bg">${g.category}</span></div>
                     <div class="text-xl font-black">${g.audited}/${g.total}</div>
                 </div>
                 <div class="accordion-content bg-gray-900/80 px-2 pb-2 text-[10px] font-mono">

@@ -63,22 +63,17 @@
             const assetRes = await fetch('/api/assets');
             const assetData = await assetRes.json();
             
-            // STRICT FILTERING based on your CSV
+            // FILTER: Exclude anything where Class contains "Kit" or "Header"
             allAssets = assetData.assets.filter(a => {
-                const cls = (a.Class || "").toLowerCase();
-                const name = (a['Asset Name'] || "").toLowerCase();
-                const category = a.Category || "";
-
-                const isKit = cls.includes('kit');
-                const isHeader = cls.includes('header');
-                const isPackage = cls.includes('package');
-                const isHiddenItem = name.includes('transmitter') || name.includes('dedo');
-
-                // Return true only if it's NOT a kit/header/transmitter/dedo and HAS a category
-                return !isKit && !isHeader && !isPackage && !isHiddenItem && category;
+                const itemClass = (a.Class || a.class || "").toLowerCase();
+                const isKit = itemClass.includes('kit');
+                const isHeader = itemClass.includes('header');
+                const hasCategory = a.Category || a.category;
+                
+                return !isKit && !isHeader && hasCategory;
             });
             
-            const uniqueNames = [...new Set(allAssets.map(a => a['Asset Name']))].sort();
+            const uniqueNames = [...new Set(allAssets.map(a => a['Asset Name'] || a.name))].filter(n => n).sort();
             const select = document.getElementById('issue-item-name');
             select.innerHTML = `<option value="">Select Item...</option>`;
             uniqueNames.forEach(n => {
@@ -93,7 +88,9 @@
 
         function updateBarcodes() {
             const name = document.getElementById('issue-item-name').value;
-            const barcodes = allAssets.filter(a => a['Asset Name'] === name).map(a => a.Barcodes).filter(b => b);
+            const barcodes = allAssets.filter(a => (a['Asset Name'] || a.name) === name)
+                                      .map(a => a.Barcodes || a.barcode)
+                                      .filter(b => b);
             const bcSelect = document.getElementById('issue-barcode');
             bcSelect.innerHTML = `<option value="NONE">General / No BC</option>`;
             barcodes.forEach(b => {
@@ -138,10 +135,10 @@
         }
 
         function renderCard(i) {
-            return `<div class="p-2 rounded-lg border-l-2 flex justify-between items-start bg-gray-800/40 border-gray-700 hover:bg-gray-800 transition-all ${i.type === 'Broken' ? 'border-yellow-500' : 'border-red-600'}">
+            return `<div class="log-card p-2 rounded-lg border-l-2 flex justify-between items-start bg-gray-800/40 border-gray-700 hover:bg-gray-800 transition-all ${i.type === 'Broken' ? 'border-yellow-500' : 'border-red-600'}">
                 <div class="overflow-hidden">
                     <p class="font-bold text-white text-[11px] leading-tight truncate">${i.item}</p>
-                    <p class="text-[9px] text-gray-500 font-mono">${i.barcode !== 'NONE' ? i.barcode : 'NO BC'}</p>
+                    <p class="text-[9px] text-gray-500 font-mono">${i.barcode && i.barcode !== 'NONE' ? i.barcode : 'NO BC'}</p>
                     <p class="text-[9px] text-gray-400 mt-1 line-clamp-2">${i.notes || ''}</p>
                 </div>
                 <button onclick="deleteIssue('${i._id}')" class="text-gray-600 hover:text-red-500 font-bold pl-1 text-xs">✕</button>
@@ -150,7 +147,7 @@
 
         function filterIssues() {
             const query = document.getElementById('issue-search').value.toLowerCase();
-            const filtered = currentIssues.filter(i => i.item.toLowerCase().includes(query) || (i.barcode && i.barcode.toLowerCase().includes(query)));
+            const filtered = currentIssues.filter(i => (i.item && i.item.toLowerCase().includes(query)) || (i.barcode && i.barcode.toLowerCase().includes(query)));
             renderLists(filtered);
         }
 
