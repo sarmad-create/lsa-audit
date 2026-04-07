@@ -60,10 +60,7 @@
 
                 activeItems = aData.assets.filter(item => {
                     const itemClass = (item.Class || item.class || "").toLowerCase();
-                    const isKit = itemClass.includes('kit');
-                    const isHeader = itemClass.includes('header');
-                    const hasCat = item.Category || item.category;
-                    return !badB.has(item.Barcodes || item.barcode) && !isKit && !isHeader && hasCat;
+                    return !badB.has(item.Barcodes || item.barcode) && !itemClass.includes('kit') && !itemClass.includes('header') && (item.Category || item.category);
                 }).map((item, idx) => ({ 
                     ...item, 
                     name: item['Asset Name'] || item.name,
@@ -99,7 +96,9 @@
             const groups = {};
             activeItems.forEach(item => {
                 if (!groups[item.name]) groups[item.name] = { name: item.name, category: item.category, total: 0, audited: 0, barcodes: [] };
-                groups[item.name].total++;
+                // Total should only count items that aren't collected (SISO-Out)
+                const isOut = item.isCollected;
+                if (!isOut) groups[item.name].total++;
                 if (item.isAudited) groups[item.name].audited++;
                 groups[item.name].barcodes.push(item);
             });
@@ -108,23 +107,23 @@
                 const aComplete = a.audited >= a.total;
                 const bComplete = b.audited >= b.total;
 
-                // RULE 1: If one is complete and the other isn't, complete goes to bottom
+                // 1. Completion is the master sort - Completed (green) ALWAYS at bottom
                 if (aComplete !== bComplete) return aComplete ? 1 : -1;
 
-                // RULE 2: If both are incomplete, prioritize lastScannedName to the top
+                // 2. For incomplete items, prioritize the one just scanned
                 if (!aComplete) {
                     if (a.name === lastScannedName) return -1;
                     if (b.name === lastScannedName) return 1;
                 }
 
-                // RULE 3: Default category/alphabetical sort
+                // 3. Normal alphabetical/category sort
                 return (CAT_ORDER[a.category] - CAT_ORDER[b.category]) || a.name.localeCompare(b.name);
             });
 
             let gAud = 0, gTarg = 0;
 
             gArr.forEach(g => {
-                const targetCount = g.barcodes.filter(b => !b.isCollected).length;
+                const targetCount = g.total;
                 gAud += g.audited; gTarg += targetCount;
                 const isOpen = openNames.has(g.name);
                 
