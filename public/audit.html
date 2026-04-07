@@ -17,6 +17,7 @@
         .error-flash { animation: shake 0.4s; border-color: #ef4444 !important; }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
         input#scanner { font-size: 16px !important; }
+        #autosave-indicator { transition: opacity 0.5s; opacity: 0; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
@@ -28,7 +29,8 @@
         <div class="flex-1 flex relative items-center">
             <input type="text" id="scanner" autofocus placeholder="SCAN..." class="w-full p-3 bg-blue-900/20 border-2 border-blue-500 rounded-xl text-lg font-mono outline-none" onkeypress="if(event.key==='Enter') handleScan(this.value)">
         </div>
-        <div class="text-right min-w-[60px]">
+        <div class="text-right min-w-[70px]">
+            <div id="autosave-indicator" class="text-[7px] text-green-400 font-bold uppercase mb-0.5">Autosaved</div>
             <p id="total-progress" class="text-xl font-black text-blue-400 leading-none">0/0</p>
             <span class="text-[8px] text-gray-500 font-bold uppercase">Items</span>
         </div>
@@ -41,6 +43,7 @@
         let lastScannedName = ""; 
         let currentAuditId = null; 
         let auditName = "";
+        let isDirty = false; // Flag to track if changes occurred
         const CAT_ORDER = { "Video": 1, "Sound": 2, "Lighting": 3, "Grip": 4 };
 
         function esc(str) { return str ? str.replace(/'/g, "\\'") : ""; }
@@ -51,58 +54,57 @@
             const resId = p.get('resume'); const newN = p.get('name');
             document.addEventListener('click', () => keepFocus());
 
-            // 1. Fetch latest external data (Issues and Assets)
             const [iRes, aRes] = await Promise.all([fetch('/api/issues'), fetch('/api/assets')]);
             const issues = await iRes.json();
             const masterAssetData = await aRes.json();
-            
             const badB = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
 
             if (resId) {
                 const hRes = await fetch('/api/history'); const hist = await hRes.json();
                 const audit = hist.find(a => a.id == resId);
-                
                 if(audit) { 
-                    currentAuditId = audit.id; 
-                    auditName = audit.name;
-                    
-                    // Filter existing items against new issues
+                    currentAuditId = audit.id; auditName = audit.name;
                     const existingItems = audit.items.filter(item => !badB.has(item.barcode || item.Barcodes));
                     const existingBarcodes = new Set(existingItems.map(i => i.barcode || i.Barcodes));
-
-                    // Check master list for NEW items matching criteria that aren't in the saved audit
-                    const newItemsFromMaster = masterAssetData.assets.filter(item => {
+                    const newItems = masterAssetData.assets.filter(item => {
                         const bc = item.Barcodes || item.barcode;
                         const itemClass = (item.Class || item.class || "").toLowerCase();
-                        return !existingBarcodes.has(bc) && !badB.has(bc) && 
-                               !itemClass.includes('kit') && !itemClass.includes('header') && (item.Category || item.category);
+                        return !existingBarcodes.has(bc) && !badB.has(bc) && !itemClass.includes('kit') && !itemClass.includes('header') && (item.Category || item.category);
                     }).map((item, idx) => ({ 
-                        ...item, 
-                        name: item['Asset Name'] || item.name,
-                        barcode: item.Barcodes || item.barcode,
-                        category: item.Category || item.category,
-                        isAudited: false, 
-                        uid: 'new-' + Date.now() + '-' + idx 
+                        ...item, name: item['Asset Name'] || item.name, barcode: item.Barcodes || item.barcode, category: item.Category || item.category, isAudited: false, uid: 'new-' + Date.now() + '-' + idx 
                     }));
-
-                    activeItems = [...existingItems, ...newItemsFromMaster];
+                    activeItems = [...existingItems, ...newItems];
                 }
             } else if (newN) {
                 activeItems = masterAssetData.assets.filter(item => {
                     const itemClass = (item.Class || item.class || "").toLowerCase();
                     return !badB.has(item.Barcodes || item.barcode) && !itemClass.includes('kit') && !itemClass.includes('header') && (item.Category || item.category);
                 }).map((item, idx) => ({ 
-                    ...item, 
-                    name: item['Asset Name'] || item.name,
-                    barcode: item.Barcodes || item.barcode,
-                    category: item.Category || item.category,
-                    isAudited: false, 
-                    uid: 'item-' + Date.now() + '-' + idx 
+                    ...item, name: item['Asset Name'] || item.name, barcode: item.Barcodes || item.barcode, category: item.Category || item.category, isAudited: false, uid: 'item-' + Date.now() + '-' + idx 
                 }));
                 currentAuditId = Date.now().toString(); auditName = newN;
             }
             render();
+            // Start the autosave loop
+            setInterval(autosave, 2000);
         };
+
+        async function autosave() {
+            if (!isDirty || !currentAuditId) return;
+            try {
+                const res = await fetch('/api/save-audit', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ id: currentAuditId, name: auditName, items: activeItems, status: 'In Progress' }) 
+                });
+                if(res.ok) {
+                    isDirty = false;
+                    const indicator = document.getElementById('autosave-indicator');
+                    indicator.style.opacity = "1";
+                    setTimeout(() => indicator.style.opacity = "0", 1000);
+                }
+            } catch (e) { console.error("Autosave failed", e); }
+        }
 
         function handleScan(val) {
             const bc = val.trim().toUpperCase().replace(/^LSA/i, '');
@@ -112,17 +114,11 @@
             activeItems.forEach(item => {
                 const itemBc = String(item.barcode || "").toUpperCase().replace(/^LSA/i, '');
                 if (itemBc === bc && !item.isAudited && !found) {
-                    item.isAudited = true; 
-                    found = true; 
-                    lastScannedName = item.name; 
-                    openNames.clear(); 
-                    openNames.add(item.name);
+                    item.isAudited = true; found = true; isDirty = true;
+                    lastScannedName = item.name; openNames.clear(); openNames.add(item.name);
                 }
             });
-            if(!found) { 
-                inputEl.classList.add('error-flash'); 
-                setTimeout(() => inputEl.classList.remove('error-flash'), 400); 
-            }
+            if(!found) { inputEl.classList.add('error-flash'); setTimeout(() => inputEl.classList.remove('error-flash'), 400); }
             inputEl.value = ''; render();
         }
 
@@ -137,13 +133,10 @@
             });
             
             let gArr = Object.values(groups).sort((a,b) => {
-                const aComplete = a.audited >= a.total;
-                const bComplete = b.audited >= b.total;
-                if (aComplete !== bComplete) return aComplete ? 1 : -1;
-                if (!aComplete) {
-                    if (a.name === lastScannedName) return -1;
-                    if (b.name === lastScannedName) return 1;
-                }
+                const aC = a.audited >= a.total; const bC = b.audited >= b.total;
+                if (aC !== bC) return aC ? 1 : -1;
+                if (!aC && a.name === lastScannedName) return -1;
+                if (!aC && b.name === lastScannedName) return 1;
                 return (CAT_ORDER[a.category] - CAT_ORDER[b.category]) || a.name.localeCompare(b.name);
             });
 
@@ -180,8 +173,8 @@
         }
 
         function toggleAccordion(n) { if(openNames.has(n)) openNames.delete(n); else { openNames.clear(); openNames.add(n); } render(); setTimeout(keepFocus, 10); }
-        function manualTick(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=true; lastScannedName = i.name; render(); setTimeout(keepFocus, 10); } }
-        function unscan(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=false; render(); setTimeout(keepFocus, 10); } }
+        function manualTick(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=true; isDirty=true; lastScannedName = i.name; render(); setTimeout(keepFocus, 10); } }
+        function unscan(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=false; isDirty=true; render(); setTimeout(keepFocus, 10); } }
         
         async function saveAndExit(s) { 
             await fetch('/api/save-audit', { 
