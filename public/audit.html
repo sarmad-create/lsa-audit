@@ -36,7 +36,6 @@
     <script>
         let activeItems = []; 
         let openNames = new Set(); 
-        let manualOverride = false;
         let lastScannedName = ""; 
         let currentAuditId = null; 
         let auditName = "";
@@ -87,7 +86,6 @@
                 if (String(item.barcode || "").toUpperCase().replace(/^LSA/i,'') === bc && !item.isAudited && !found) {
                     item.isAudited = true; 
                     found = true; 
-                    manualOverride = false;
                     lastScannedName = item.name; 
                     openNames.clear(); 
                     openNames.add(item.name);
@@ -110,25 +108,24 @@
                 const aComplete = a.audited >= a.total;
                 const bComplete = b.audited >= b.total;
 
-                // 1. If one is complete and the other isn't, complete goes to bottom
+                // RULE 1: If one is complete and the other isn't, complete goes to bottom
                 if (aComplete !== bComplete) return aComplete ? 1 : -1;
 
-                // 2. If both are incomplete, priority goes to the last scanned item
-                if (!aComplete && !bComplete) {
+                // RULE 2: If both are incomplete, prioritize lastScannedName to the top
+                if (!aComplete) {
                     if (a.name === lastScannedName) return -1;
                     if (b.name === lastScannedName) return 1;
                 }
 
-                // 3. Otherwise, sort by Category and Name
+                // RULE 3: Default category/alphabetical sort
                 return (CAT_ORDER[a.category] - CAT_ORDER[b.category]) || a.name.localeCompare(b.name);
             });
 
-            let globalAudited = 0, globalTarget = 0;
+            let gAud = 0, gTarg = 0;
 
             gArr.forEach(g => {
-                // targetCount represents items that SHOULD be in store
                 const targetCount = g.barcodes.filter(b => !b.isCollected).length;
-                globalAudited += g.audited; globalTarget += targetCount;
+                gAud += g.audited; gTarg += targetCount;
                 const isOpen = openNames.has(g.name);
                 
                 const div = document.createElement('div');
@@ -156,10 +153,10 @@
                 </div>`;
                 container.appendChild(div);
             });
-            document.getElementById('total-progress').innerText = `${globalAudited}/${globalTarget}`;
+            document.getElementById('total-progress').innerText = `${gAud}/${gTarg}`;
         }
 
-        function toggleAccordion(n) { manualOverride = true; if(openNames.has(n)) openNames.delete(n); else { openNames.clear(); openNames.add(n); } render(); setTimeout(keepFocus, 10); }
+        function toggleAccordion(n) { if(openNames.has(n)) openNames.delete(n); else { openNames.clear(); openNames.add(n); } render(); setTimeout(keepFocus, 10); }
         function manualTick(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=true; lastScannedName = i.name; render(); setTimeout(keepFocus, 10); } }
         function unscan(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=false; render(); setTimeout(keepFocus, 10); } }
         
