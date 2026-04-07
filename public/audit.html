@@ -14,53 +14,95 @@
         .cat-Video-bg { background-color: #a21caf; color: white; } .cat-Sound-bg { background-color: #be123c; color: white; } .cat-Lighting-bg { background-color: #a16207; color: white; } .cat-Grip-bg { background-color: #1d4ed8; color: white; }
         .accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
         .open .accordion-content { max-height: 5000px; }
+        .error-flash { animation: shake 0.4s; border-color: #ef4444 !important; }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
         input#scanner { font-size: 16px !important; }
+        body { -webkit-tap-highlight-color: transparent; }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen">
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans">
     <div class="sticky top-0 z-50 bg-gray-900 border-b border-gray-700 p-2 flex gap-2 items-center shadow-2xl">
         <div class="flex flex-col gap-1">
             <button onclick="saveAndExit('In Progress')" class="bg-gray-800 text-white px-2 py-1.5 rounded-lg font-bold text-[10px] border border-gray-600 uppercase">Pause</button>
             <button onclick="saveAndExit('Completed')" class="bg-green-900/40 text-green-400 px-2 py-1.5 rounded-lg font-bold text-[10px] border border-green-500 uppercase">Done</button>
         </div>
+        
         <div class="flex-1 flex relative items-center">
-            <input type="text" id="scanner" autofocus placeholder="SCAN..." class="w-full p-3 bg-blue-900/20 border-2 border-blue-500 rounded-xl text-lg font-mono outline-none" onkeypress="if(event.key==='Enter') handleScan(this.value)">
+            <input type="text" id="scanner" autofocus placeholder="SCAN..." class="w-full p-3 bg-blue-900/20 border-2 border-blue-500 rounded-xl text-lg font-mono outline-none pr-12" onkeypress="if(event.key==='Enter') handleScan(this.value)">
+            <button onclick="handleScan(document.getElementById('scanner').value)" class="absolute right-1.5 p-2 bg-blue-600 rounded-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+            </button>
         </div>
+        
         <div class="text-right min-w-[60px]">
             <p id="total-progress" class="text-xl font-black text-blue-400 leading-none">0/0</p>
             <span class="text-[8px] text-gray-500 font-bold uppercase">Items</span>
         </div>
     </div>
+
     <div id="audit-list" class="p-3 max-w-5xl mx-auto space-y-2 pb-32"></div>
 
     <script>
         let activeItems = []; 
         let openNames = new Set(); 
+        let manualOverride = false;
         let lastScannedName = ""; 
         let currentAuditId = null; 
         let auditName = "";
         const CAT_ORDER = { "Video": 1, "Sound": 2, "Lighting": 3, "Grip": 4 };
 
-        function esc(str) { return str ? str.replace(/'/g, "\\'") : ""; }
-        function keepFocus() { const s = document.getElementById('scanner'); if (document.activeElement !== s) s.focus(); }
+        function esc(str) { 
+            if (!str) return "";
+            return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); 
+        }
+
+        function keepFocus() {
+            const scanner = document.getElementById('scanner');
+            if (document.activeElement !== scanner) { scanner.focus(); }
+        }
 
         window.onload = async () => {
-            const p = new URLSearchParams(window.location.search);
-            const resId = p.get('resume'); const newN = p.get('name');
-            document.addEventListener('click', () => keepFocus());
+            const params = new URLSearchParams(window.location.search);
+            const resumeId = params.get('resume');
+            const newName = params.get('name');
 
-            if (resId) {
-                const res = await fetch('/api/history'); const hist = await res.json();
-                const audit = hist.find(a => a.id == resId);
-                if(audit) { activeItems = audit.items; currentAuditId = audit.id; auditName = audit.name; }
-            } else if (newN) {
-                const aRes = await fetch('/api/assets'); const aData = await aRes.json();
-                const iRes = await fetch('/api/issues'); const issues = await iRes.json();
-                const badB = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
+            document.addEventListener('touchstart', (e) => {
+                if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
+                    setTimeout(keepFocus, 10);
+                }
+            }, {passive: true});
 
-                activeItems = aData.assets.filter(item => {
+            document.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
+                    keepFocus();
+                }
+            });
+
+            // Fetch latest maintenance list for cross-referencing
+            const issueRes = await fetch('/api/issues');
+            const issues = await issueRes.json();
+            const badBarcodes = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
+
+            if (resumeId) {
+                const res = await fetch('/api/history');
+                const history = await res.json();
+                const audit = history.find(a => a.id == resumeId);
+                if(audit) { 
+                    // Cross-reference saved items with current maintenance list
+                    activeItems = audit.items.filter(item => !badBarcodes.has(item.barcode || item.Barcodes));
+                    currentAuditId = audit.id; 
+                    auditName = audit.name; 
+                }
+            } else if (newName) {
+                const res = await fetch('/api/assets');
+                const data = await res.json();
+
+                activeItems = data.assets.filter(item => {
+                    const bc = item.Barcodes || item.barcode;
                     const itemClass = (item.Class || item.class || "").toLowerCase();
-                    return !badB.has(item.Barcodes || item.barcode) && !itemClass.includes('kit') && !itemClass.includes('header') && (item.Category || item.category);
+                    return !badBarcodes.has(bc) && !itemClass.includes('kit') && !itemClass.includes('header') && (item.Category || item.category);
                 }).map((item, idx) => ({ 
                     ...item, 
                     name: item['Asset Name'] || item.name,
@@ -69,8 +111,10 @@
                     isAudited: false, 
                     uid: 'item-' + Date.now() + '-' + idx 
                 }));
-                currentAuditId = Date.now().toString(); auditName = newN;
-            }
+                
+                currentAuditId = Date.now().toString(); 
+                auditName = newName;
+            } else { window.location.href = '/'; }
             render();
         };
 
@@ -78,75 +122,83 @@
             const bc = val.trim().toUpperCase().replace(/^LSA/i, '');
             const inputEl = document.getElementById('scanner');
             if(!bc) return;
+
             let found = false;
-            activeItems.forEach(item => {
-                if (String(item.barcode || "").toUpperCase().replace(/^LSA/i,'') === bc && !item.isAudited && !found) {
+            activeItems.forEach(item => { 
+                const itemBc = String(item.barcode || "").toUpperCase().replace(/^LSA/i, '');
+                if (itemBc === bc && !item.isAudited && !found) { 
                     item.isAudited = true; 
                     found = true; 
-                    lastScannedName = item.name; 
+                    lastScannedName = item.name;
                     openNames.clear(); 
                     openNames.add(item.name);
-                }
+                } 
             });
-            inputEl.value = ''; render();
+
+            if(!found) { 
+                inputEl.classList.add('error-flash'); 
+                setTimeout(() => inputEl.classList.remove('error-flash'), 400); 
+            }
+            
+            inputEl.value = ''; 
+            render();
+            setTimeout(keepFocus, 50);
         }
 
         function render() {
-            const container = document.getElementById('audit-list'); container.innerHTML = '';
+            const container = document.getElementById('audit-list'); 
+            container.innerHTML = '';
             const groups = {};
+
             activeItems.forEach(item => {
-                if (!groups[item.name]) groups[item.name] = { name: item.name, category: item.category, total: 0, audited: 0, barcodes: [] };
-                // Total should only count items that aren't collected (SISO-Out)
-                const isOut = item.isCollected;
-                if (!isOut) groups[item.name].total++;
+                if (!groups[item.name]) {
+                    groups[item.name] = { name: item.name, category: item.category, total: 0, audited: 0, barcodes: [] };
+                }
+                if (!item.isCollected) groups[item.name].total++;
                 if (item.isAudited) groups[item.name].audited++;
                 groups[item.name].barcodes.push(item);
             });
-            
-            let gArr = Object.values(groups).sort((a,b) => {
-                const aComplete = a.audited >= a.total;
-                const bComplete = b.audited >= b.total;
 
-                // 1. Completion is the master sort - Completed (green) ALWAYS at bottom
-                if (aComplete !== bComplete) return aComplete ? 1 : -1;
-
-                // 2. For incomplete items, prioritize the one just scanned
-                if (!aComplete) {
+            let groupArray = Object.values(groups).sort((a,b) => {
+                const aDone = a.audited >= a.total;
+                const bDone = b.audited >= b.total;
+                if (aDone !== bDone) return aDone ? 1 : -1;
+                if (!aDone) {
                     if (a.name === lastScannedName) return -1;
                     if (b.name === lastScannedName) return 1;
                 }
-
-                // 3. Normal alphabetical/category sort
                 return (CAT_ORDER[a.category] - CAT_ORDER[b.category]) || a.name.localeCompare(b.name);
             });
 
             let gAud = 0, gTarg = 0;
-
-            gArr.forEach(g => {
-                const targetCount = g.total;
-                gAud += g.audited; gTarg += targetCount;
+            groupArray.forEach(g => {
+                gAud += g.audited; gTarg += g.total;
                 const isOpen = openNames.has(g.name);
-                
+                const catClass = `cat-${(g.category || 'General').replace(/\s/g, '')}`;
                 const div = document.createElement('div');
-                div.className = `audit-row-item ${g.audited >= targetCount ? 'row-complete' : ''} ${isOpen ? 'open' : ''} cat-${(g.category || 'General').replace(/\s/g, '')}`;
-                div.innerHTML = `<div class="p-3 flex justify-between items-center cursor-pointer" onclick="toggleAccordion('${esc(g.name)}')">
-                    <div class="flex-1"><p class="font-bold text-sm text-white">${g.name}</p>
-                    <span class="text-[7px] px-1 py-0.5 rounded font-black uppercase cat-${(g.category || 'General').replace(/\s/g, '')}-bg">${g.category}</span></div>
-                    <div class="text-xl font-black">${g.audited}/${targetCount}</div>
+                div.className = `audit-row-item ${g.audited >= g.total ? 'row-complete' : ''} ${isOpen ? 'open' : ''} ${catClass}`;
+                
+                div.innerHTML = `
+                <div class="p-3 flex justify-between items-center cursor-pointer" onclick="toggleAccordion('${esc(g.name)}')">
+                    <div class="flex-1">
+                        <p class="font-bold text-sm text-white">${g.name}</p>
+                        <span class="text-[7px] px-1 py-0.5 rounded font-black uppercase ${catClass}-bg">${g.category}</span>
+                    </div>
+                    <div class="text-xl font-black">${g.audited}/${g.total}</div>
                 </div>
                 <div class="accordion-content bg-gray-900/80 px-2 pb-2 text-[10px] font-mono">
                     <div class="grid grid-cols-3 gap-2">
                         <div>
-                            <p class="mb-1 uppercase text-[8px] text-center text-green-500 font-bold">Scanned</p>
-                            <ul>${g.barcodes.filter(b=>b.isAudited).map(b=>`<li class="mb-1 flex justify-between">✅ ${b.barcode||'No BC'} <button onclick="unscan('${b.uid}')" class="text-red-500">✕</button></li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                            <p class="text-green-500 font-bold mb-1 uppercase text-[8px] text-center">Scanned</p>
+                            <ul>${g.barcodes.filter(b=>b.isAudited).map(b=>`<li class="flex justify-between items-center mb-1">✅ ${b.barcode||'No BC'} <button onclick="unscan('${b.uid}')" class="text-red-500">✕</button></li>`).join('')||'<li class="text-gray-600 italic">0</li>'}</ul>
                         </div>
                         <div>
-                            <p class="mb-1 uppercase text-[8px] text-center text-gray-400 font-bold">In-Store</p>
-                            <ul>${g.barcodes.filter(b=>!b.isCollected && !b.isAudited).map(b=>`<li class="mb-1 flex justify-between">📦 ${b.barcode||'No BC'} ${!b.barcode?`<button onclick="manualTick('${b.uid}')" class="bg-blue-600 px-1 rounded text-[8px]">TICK</button>`:''}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                            <p class="text-gray-500 font-bold mb-1 uppercase text-[8px] text-center">In-Store</p>
+                            <ul>${g.barcodes.filter(b=>!b.isCollected && !b.isAudited).map(b=>`<li class="flex justify-between items-center mb-1">📦 ${b.barcode||'No BC'} ${!b.barcode ? `<button onclick="manualTick('${b.uid}')" class="bg-blue-600 text-[8px] px-1 rounded">TICK</button>` : ''}</li>`).join('')||'<li class="text-gray-600 italic">0</li>'}</ul>
                         </div>
                         <div>
-                            <p class="mb-1 uppercase text-[8px] text-center font-bold">SISO-Out</p>
-                            <ul>${g.barcodes.filter(b=>b.isCollected).map(b=>`<li class="mb-1 text-gray-500 text-[9px]">📡 ${b.barcode||'No BC'}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                            <p class="text-red-500 font-bold mb-1 uppercase text-[8px] text-center">SISO-Out</p>
+                            <ul>${g.barcodes.filter(b=>b.isCollected).map(b=>`<li class="text-gray-500 text-[9px]">📡 ${b.barcode||'No BC'}</li>`).join('')||'<li class="text-gray-600 italic">0</li>'}</ul>
                         </div>
                     </div>
                 </div>`;
@@ -160,12 +212,12 @@
         function unscan(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=false; render(); setTimeout(keepFocus, 10); } }
         
         async function saveAndExit(s) { 
-            await fetch('/api/save-audit', { 
+            const res = await fetch('/api/save-audit', { 
                 method: 'POST', 
                 headers: {'Content-Type': 'application/json'}, 
                 body: JSON.stringify({ id: currentAuditId, name: auditName, items: activeItems, status: s }) 
             }); 
-            window.location.href = '/';
+            if(res.ok) window.location.href = '/';
         }
     </script>
 </body>
