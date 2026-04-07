@@ -29,7 +29,7 @@
         <div class="flex-1 flex relative items-center">
             <input type="text" id="scanner" autofocus placeholder="SCAN..." class="w-full p-3 bg-blue-900/20 border-2 border-blue-500 rounded-xl text-lg font-mono outline-none" onkeypress="if(event.key==='Enter') handleScan(this.value)">
         </div>
-        <div class="text-right min-w-[70px]">
+        <div class="text-right min-w-[75px]">
             <div id="autosave-indicator" class="text-[7px] text-green-400 font-bold uppercase mb-0.5">Autosaved</div>
             <p id="total-progress" class="text-xl font-black text-blue-400 leading-none">0/0</p>
             <span class="text-[8px] text-gray-500 font-bold uppercase">Items</span>
@@ -43,7 +43,7 @@
         let lastScannedName = ""; 
         let currentAuditId = null; 
         let auditName = "";
-        let isDirty = false; // Flag to track if changes occurred
+        let isDirty = false;
         const CAT_ORDER = { "Video": 1, "Sound": 2, "Lighting": 3, "Grip": 4 };
 
         function esc(str) { return str ? str.replace(/'/g, "\\'") : ""; }
@@ -85,9 +85,33 @@
                 currentAuditId = Date.now().toString(); auditName = newN;
             }
             render();
-            // Start the autosave loop
-            setInterval(autosave, 2000);
+            
+            // Loops
+            setInterval(autosave, 2000);   // Save progress
+            setInterval(syncBackend, 3000); // Sync SISO/Collected status
         };
+
+        async function syncBackend() {
+            try {
+                const res = await fetch('/api/assets');
+                const data = await res.json();
+                const freshAssets = data.assets;
+                
+                let changed = false;
+                activeItems.forEach(item => {
+                    const match = freshAssets.find(fa => (fa.Barcodes || fa.barcode) === (item.barcode || item.Barcodes));
+                    if (match && match.isCollected !== item.isCollected) {
+                        item.isCollected = match.isCollected;
+                        changed = true;
+                    }
+                });
+
+                if (changed) {
+                    isDirty = true;
+                    render();
+                }
+            } catch (e) { console.error("Sync failed", e); }
+        }
 
         async function autosave() {
             if (!isDirty || !currentAuditId) return;

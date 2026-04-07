@@ -1,13 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"><title>Audit History - KitStore</title>
+    <meta charset="UTF-8">
+    <title>Audit History - KitStore</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+
     <style>
         .status-tag { padding: 4px 12px; border-radius: 9999px; font-size: 0.75rem; font-weight: 900; text-transform: uppercase; }
         .status-completed { background-color: #10b981; color: #064e3b; }
         .status-progress { background-color: #3b82f6; color: #1d4ed8; }
+        /* Style for the export dropdown */
+        .export-select { background-color: #1e293b; color: #94a3b8; font-size: 10px; font-weight: 800; border: 1px solid #334155; border-radius: 6px; padding: 4px 8px; cursor: pointer; outline: none; transition: all 0.2s; }
+        .export-select:hover { border-color: #3b82f6; color: white; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 p-8">
@@ -19,19 +27,107 @@
 
     <script>
         window.onload = loadHistory;
+
         async function loadHistory() {
             const res = await fetch('/api/history');
             const data = await res.json();
             document.getElementById('history-list').innerHTML = data.sort((a,b)=>b.id-a.id).map(h => `
                 <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700 flex justify-between items-center shadow-lg">
                     <div onclick="window.location.href='/audit?resume=${h.id}'" class="flex-1 cursor-pointer">
-                        <div class="flex items-center gap-3 mb-1"><span class="status-tag ${h.status==='Completed'?'status-completed':'status-progress'}">${h.status}</span><p class="text-2xl font-bold">${h.name}</p></div>
+                        <div class="flex items-center gap-3 mb-1">
+                            <span class="status-tag ${h.status==='Completed'?'status-completed':'status-progress'}">${h.status}</span>
+                            <p class="text-2xl font-bold">${h.name}</p>
+                        </div>
                         <span class="text-[10px] text-gray-500 uppercase font-black">${h.timestamp}</span>
                     </div>
-                    <button onclick="deleteHistory(${h.id})" class="text-red-500 px-4 font-bold">DELETE</button>
+                    
+                    <div class="flex items-center gap-4">
+                        <select onchange="handleExport(this, '${h.id}')" class="export-select">
+                            <option value="">EXPORT...</option>
+                            <option value="csv">CSV FILE</option>
+                            <option value="pdf">PDF REPORT</option>
+                        </select>
+                        
+                        <button onclick="deleteHistory(${h.id})" class="text-red-500 px-4 font-bold hover:text-red-400 transition-colors">DELETE</button>
+                    </div>
                 </div>`).join('');
         }
-        async function deleteHistory(id) { if(confirm("Delete audit?")) { await fetch(`/api/history/${id}`, {method:'DELETE'}); loadHistory(); } }
+
+        async function deleteHistory(id) { 
+            if(confirm("Delete audit?")) { 
+                await fetch(`/api/history/${id}`, {method:'DELETE'}); 
+                loadHistory(); 
+            } 
+        }
+
+        // --- EXPORT LOGIC ---
+
+        async function handleExport(select, auditId) {
+            const format = select.value;
+            if (!format) return;
+
+            const res = await fetch('/api/history');
+            const history = await res.json();
+            const audit = history.find(a => a.id == auditId);
+            
+            if (!audit) return alert("Audit not found");
+
+            // Process items one-by-one with status icons
+            const reportData = audit.items.map(item => [
+                item.name || item['Asset Name'] || "Unknown",
+                item.barcode || item.Barcodes || "NO BC",
+                item.isAudited ? "YES" : "NO",
+                item.isAudited ? "✅" : "❌"
+            ]);
+
+            if (format === 'csv') {
+                exportToCSV(audit.name, reportData);
+            } else if (format === 'pdf') {
+                exportToPDF(audit.name, reportData);
+            }
+
+            select.value = ""; // Reset dropdown
+        }
+
+        function exportToCSV(auditName, rows) {
+            let csvContent = "Asset Name,Barcode,Scanned,Status\n";
+            rows.forEach(row => {
+                const cleanName = row[0].replace(/,/g, ""); // Remove commas to keep CSV valid
+                csvContent += `${cleanName},${row[1]},${row[2]},${row[3]}\n`;
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute("download", `Audit_${auditName.replace(/\s+/g, '_')}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function exportToPDF(auditName, rows) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            doc.setFontSize(20);
+            doc.text("Audit Report", 14, 20);
+            doc.setFontSize(10);
+            doc.setTextColor(100);
+            doc.text(`Project: ${auditName}`, 14, 28);
+            doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 33);
+
+            doc.autoTable({
+                startY: 40,
+                head: [['Asset Name', 'Barcode', 'Scanned', 'Status']],
+                body: rows,
+                theme: 'striped',
+                headStyles: { fillColor: [30, 41, 59] }, // Slate-800
+                styles: { fontSize: 9 },
+                columnStyles: { 3: { halign: 'center' } } // Center the checkmarks
+            });
+
+            doc.save(`Audit_${auditName.replace(/\s+/g, '_')}.pdf`);
+        }
     </script>
 </body>
 </html>
