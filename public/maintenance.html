@@ -131,19 +131,23 @@
         }
 
         function renderCard(i) {
-            return `<div class="log-card p-2 rounded-lg border-l-2 flex justify-between items-start bg-gray-800/40 border-gray-700 hover:bg-gray-800 transition-all ${i.type === 'Broken' ? 'border-yellow-500' : 'border-red-600'}">
-                <div class="overflow-hidden">
-                    <p class="font-bold text-white text-[11px] leading-tight truncate">${i.item}</p>
-                    <p class="text-[9px] text-gray-500 font-mono">${i.barcode && i.barcode !== 'NONE' ? i.barcode : 'NO BC'}</p>
-                    <p class="text-[9px] text-gray-400 mt-1 line-clamp-2">${i.notes || ''}</p>
-                </div>
-                <button onclick="deleteIssue('${i._id}')" class="text-gray-600 hover:text-red-500 font-bold pl-1 text-xs">✕</button>
-            </div>`;
+            return `
+                <div class="log-card p-2 rounded-lg border-l-2 flex justify-between items-start bg-gray-800/40 border-gray-700 hover:bg-gray-800 transition-all ${i.type === 'Broken' ? 'border-yellow-500' : 'border-red-600'}">
+                    <div class="overflow-hidden">
+                        <p class="font-bold text-white text-[11px] leading-tight truncate">${i.item}</p>
+                        <p class="text-[9px] text-gray-500 font-mono">${i.barcode !== 'NONE' ? i.barcode : 'NO BC'}</p>
+                        <p class="text-[9px] text-gray-400 mt-1 line-clamp-2">${i.notes || ''}</p>
+                    </div>
+                    <button onclick="deleteIssue('${i._id}')" class="text-gray-600 hover:text-red-500 font-bold pl-1 text-xs">✕</button>
+                </div>`;
         }
 
         function filterIssues() {
             const query = document.getElementById('issue-search').value.toLowerCase();
-            const filtered = currentIssues.filter(i => (i.item && i.item.toLowerCase().includes(query)) || (i.barcode && i.barcode.toLowerCase().includes(query)));
+            const filtered = currentIssues.filter(i => 
+                i.item.toLowerCase().includes(query) || 
+                (i.barcode && i.barcode.toLowerCase().includes(query))
+            );
             renderLists(filtered);
         }
 

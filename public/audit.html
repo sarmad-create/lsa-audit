@@ -101,29 +101,47 @@
             let gAud = 0, gTarg = 0;
 
             gArr.forEach(g => {
-                gAud += g.audited; gTarg += g.total;
+                const targetCount = g.barcodes.filter(b => !b.isCollected).length;
+                gAud += g.audited; gTarg += targetCount;
                 const isOpen = openNames.has(g.name);
                 const div = document.createElement('div');
-                div.className = `audit-row-item ${g.audited >= g.total ? 'row-complete' : ''} ${isOpen ? 'open' : ''} cat-${(g.category || 'General').replace(/\s/g, '')}`;
-                div.innerHTML = `<div class=\"p-3 flex justify-between items-center cursor-pointer\" onclick=\"toggleAccordion('${esc(g.name)}')\">
-                    <div class=\"flex-1\"><p class=\"font-bold text-sm text-white\">${g.name}</p>
-                    <span class=\"text-[7px] px-1 py-0.5 rounded font-black uppercase cat-${(g.category || 'General').replace(/\s/g, '')}-bg\">${g.category}</span></div>
-                    <div class=\"text-xl font-black\">${g.audited}/${g.total}</div>
+                div.className = `audit-row-item ${g.audited >= targetCount ? 'row-complete' : ''} ${isOpen ? 'open' : ''} cat-${(g.category || 'General').replace(/\s/g, '')}`;
+                div.innerHTML = `<div class="p-3 flex justify-between items-center cursor-pointer" onclick="toggleAccordion('${esc(g.name)}')">
+                    <div class="flex-1"><p class="font-bold text-sm text-white">${g.name}</p>
+                    <span class="text-[7px] px-1 py-0.5 rounded font-black uppercase cat-${(g.category || 'General').replace(/\s/g, '')}-bg">${g.category}</span></div>
+                    <div class="text-xl font-black">${g.audited}/${targetCount}</div>
                 </div>
-                <div class=\"accordion-content bg-gray-900/80 px-2 pb-2 text-[10px] font-mono\">
-                    ${g.barcodes.map(b => `<div class=\"flex justify-between p-1 border-b border-gray-800\">
-                        <span>${b.barcode || 'No BC'}</span>
-                        <span>${b.isAudited ? '✅' : '❌'}</span>
-                    </div>`).join('')}
+                <div class="accordion-content bg-gray-900/80 px-2 pb-2 text-[10px] font-mono">
+                    <div class="grid grid-cols-3 gap-2">
+                        <div>
+                            <p class="mb-1 uppercase text-[8px] text-center text-green-500">Scanned</p>
+                            <ul>${g.barcodes.filter(b=>b.isAudited).map(b=>`<li class="mb-1 flex justify-between">✅ ${b.barcode||'No BC'} <button onclick="unscan('${b.uid}')" class="text-red-500">✕</button></li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                        </div>
+                        <div>
+                            <p class="mb-1 uppercase text-[8px] text-center text-gray-400">In-Store</p>
+                            <ul>${g.barcodes.filter(b=>!b.isCollected && !b.isAudited).map(b=>`<li class="mb-1 flex justify-between">📦 ${b.barcode||'No BC'} ${!b.barcode?`<button onclick="manualTick('${b.uid}')" class="bg-blue-600 px-1 rounded text-[8px]">TICK</button>`:''}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                        </div>
+                        <div>
+                            <p class="mb-1 uppercase text-[8px] text-center">SISO-Out</p>
+                            <ul>${g.barcodes.filter(b=>b.isCollected).map(b=>`<li class="mb-1 text-gray-500 text-[9px]">📡 ${b.barcode||'No BC'}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                        </div>
+                    </div>
                 </div>`;
                 container.appendChild(div);
             });
             document.getElementById('total-progress').innerText = `${gAud}/${gTarg}`;
         }
 
-        function toggleAccordion(n) { manualOverride = true; if(openNames.has(n)) openNames.delete(n); else { openNames.clear(); openNames.add(n); } render(); }
+        function toggleAccordion(n) { manualOverride = true; if(openNames.has(n)) openNames.delete(n); else { openNames.clear(); openNames.add(n); } render(); setTimeout(keepFocus, 10); }
+        function manualTick(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=true; render(); setTimeout(keepFocus, 10); } }
+        function unscan(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=false; render(); setTimeout(keepFocus, 10); } }
+        
         async function saveAndExit(s) { 
-            await fetch('/api/save-audit', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: currentAuditId, name: auditName, items: activeItems, status: s }) }); 
+            await fetch('/api/save-audit', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ id: currentAuditId, name: auditName, items: activeItems, status: s }) 
+            }); 
             window.location.href = '/';
         }
     </script>
