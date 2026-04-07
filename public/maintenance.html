@@ -1,6 +1,3 @@
-Gemini
-
-LSA Kit Audit Project Status
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -45,13 +42,13 @@ LSA Kit Audit Project Status
                 class="w-full p-3 bg-gray-800 border border-gray-700 rounded-xl outline-none focus:border-blue-500 text-sm">
         </div>
 
-        <div class="grid grid-cols-2 gap-3 md:gap-8">
-            <div class="space-y-3">
-                <h3 class="text-[10px] font-black text-yellow-500 uppercase tracking-widest border-b border-yellow-900/50 pb-1">Broken</h3>
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <h3 class="text-[10px] font-black text-yellow-500 uppercase mb-2 border-b border-yellow-900 pb-1">Broken Items</h3>
                 <div id="broken-list" class="space-y-2"></div>
             </div>
-            <div class="space-y-3">
-                <h3 class="text-[10px] font-black text-red-500 uppercase tracking-widest border-b border-red-900/50 pb-1">Missing</h3>
+            <div>
+                <h3 class="text-[10px] font-black text-red-500 uppercase mb-2 border-b border-red-900 pb-1">Missing Items</h3>
                 <div id="missing-list" class="space-y-2"></div>
             </div>
         </div>
@@ -62,23 +59,24 @@ LSA Kit Audit Project Status
         let selectedType = '';
         let currentIssues = [];
 
-        // Helper to escape punctuation for JS strings
-        function esc(str) { 
-            if (!str) return "";
-            return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); 
-        }
-
         window.onload = async () => {
             const assetRes = await fetch('/api/assets');
             const assetData = await assetRes.json();
-            allAssets = assetData.assets;
             
-            const uniqueNames = [...new Set(allAssets.map(a => a.name))].sort();
+            allAssets = assetData.assets.filter(a => {
+                const itemClass = (a.Class || a.class || "").toLowerCase();
+                const isKit = itemClass.includes('kit');
+                const isHeader = itemClass.includes('header');
+                const hasCategory = a.Category || a.category;
+                return !isKit && !isHeader && hasCategory;
+            });
+            
+            const uniqueNames = [...new Set(allAssets.map(a => a['Asset Name'] || a.name))].filter(n => n).sort();
             const select = document.getElementById('issue-item-name');
             select.innerHTML = `<option value="">Select Item...</option>`;
             uniqueNames.forEach(n => {
                 let opt = document.createElement('option');
-                opt.value = n; // Browser handles punctuation in .value automatically
+                opt.value = n;
                 opt.textContent = n;
                 select.appendChild(opt);
             });
@@ -88,7 +86,7 @@ LSA Kit Audit Project Status
 
         function updateBarcodes() {
             const name = document.getElementById('issue-item-name').value;
-            const barcodes = allAssets.filter(a => a.name === name).map(a => a.barcode).filter(b => b);
+            const barcodes = allAssets.filter(a => (a['Asset Name'] || a.name) === name).map(a => a.Barcodes || a.barcode).filter(b => b);
             const bcSelect = document.getElementById('issue-barcode');
             bcSelect.innerHTML = `<option value="NONE">General / No BC</option>`;
             barcodes.forEach(b => {
@@ -128,29 +126,24 @@ LSA Kit Audit Project Status
         function renderLists(issues) {
             const brokenContainer = document.getElementById('broken-list');
             const missingContainer = document.getElementById('missing-list');
-            
             brokenContainer.innerHTML = issues.filter(i => i.type === 'Broken').map(i => renderCard(i)).join('') || '<p class="text-gray-700 italic text-[10px]">None</p>';
             missingContainer.innerHTML = issues.filter(i => i.type === 'Missing').map(i => renderCard(i)).join('') || '<p class="text-gray-700 italic text-[10px]">None</p>';
         }
 
         function renderCard(i) {
-            return `
-                <div class="log-card p-2 rounded-lg border-l-2 flex justify-between items-start bg-gray-800/40 border-gray-700 hover:bg-gray-800 transition-all ${i.type === 'Broken' ? 'border-yellow-500' : 'border-red-600'}">
-                    <div class="overflow-hidden">
-                        <p class="font-bold text-white text-[11px] leading-tight truncate">${i.item}</p>
-                        <p class="text-[9px] text-gray-500 font-mono">${i.barcode !== 'NONE' ? i.barcode : 'NO BC'}</p>
-                        <p class="text-[9px] text-gray-400 mt-1 line-clamp-2">${i.notes || ''}</p>
-                    </div>
-                    <button onclick="deleteIssue('${i._id}')" class="text-gray-600 hover:text-red-500 font-bold pl-1 text-xs">✕</button>
-                </div>`;
+            return `<div class="log-card p-2 rounded-lg border-l-2 flex justify-between items-start bg-gray-800/40 border-gray-700 hover:bg-gray-800 transition-all ${i.type === 'Broken' ? 'border-yellow-500' : 'border-red-600'}">
+                <div class="overflow-hidden">
+                    <p class="font-bold text-white text-[11px] leading-tight truncate">${i.item}</p>
+                    <p class="text-[9px] text-gray-500 font-mono">${i.barcode && i.barcode !== 'NONE' ? i.barcode : 'NO BC'}</p>
+                    <p class="text-[9px] text-gray-400 mt-1 line-clamp-2">${i.notes || ''}</p>
+                </div>
+                <button onclick="deleteIssue('${i._id}')" class="text-gray-600 hover:text-red-500 font-bold pl-1 text-xs">✕</button>
+            </div>`;
         }
 
         function filterIssues() {
             const query = document.getElementById('issue-search').value.toLowerCase();
-            const filtered = currentIssues.filter(i => 
-                i.item.toLowerCase().includes(query) || 
-                (i.barcode && i.barcode.toLowerCase().includes(query))
-            );
+            const filtered = currentIssues.filter(i => (i.item && i.item.toLowerCase().includes(query)) || (i.barcode && i.barcode.toLowerCase().includes(query)));
             renderLists(filtered);
         }
 
@@ -162,5 +155,3 @@ LSA Kit Audit Project Status
     </script>
 </body>
 </html>
-maintenance.html
-Displaying maintenance.html.
