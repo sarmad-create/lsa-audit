@@ -51,44 +51,66 @@
 
         window.onload = async () => {
             const p = new URLSearchParams(window.location.search);
-            const resId = p.get('resume'); const newN = p.get('name');
+            const resId = p.get('resume'); 
+            const newN = p.get('name');
             document.addEventListener('click', () => keepFocus());
 
+            // 1. Always fetch the freshest data first
             const [iRes, aRes] = await Promise.all([fetch('/api/issues'), fetch('/api/assets')]);
             const issues = await iRes.json();
             const masterAssetData = await aRes.json();
+            
+            // Map maintenance items
             const badB = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
 
+            // 2. Define the "True" inventory from current CSV
+            const currentInventory = masterAssetData.assets.filter(item => {
+                const itemClass = (item.Class || item.class || "").toLowerCase();
+                const bc = item.Barcodes || item.barcode;
+                return !badB.has(bc) && 
+                       !itemClass.includes('kit') && 
+                       !itemClass.includes('header') && 
+                       (item.Category || item.category);
+            }).map((item, idx) => ({
+                ...item,
+                name: item['Asset Name'] || item.name,
+                barcode: item.Barcodes || item.barcode,
+                category: item.Category || item.category,
+                isAudited: false, 
+                uid: 'item-' + Date.now() + '-' + idx
+            }));
+
             if (resId) {
-                const hRes = await fetch('/api/history'); const hist = await hRes.json();
-                const audit = hist.find(a => a.id == resId);
-                if(audit) { 
-                    currentAuditId = audit.id; auditName = audit.name;
-                    const existingItems = audit.items.filter(item => !badB.has(item.barcode || item.Barcodes));
-                    const existingBarcodes = new Set(existingItems.map(i => i.barcode || i.Barcodes));
-                    const newItems = masterAssetData.assets.filter(item => {
-                        const bc = item.Barcodes || item.barcode;
-                        const itemClass = (item.Class || item.class || "").toLowerCase();
-                        return !existingBarcodes.has(bc) && !badB.has(bc) && !itemClass.includes('kit') && !itemClass.includes('header') && (item.Category || item.category);
-                    }).map((item, idx) => ({ 
-                        ...item, name: item['Asset Name'] || item.name, barcode: item.Barcodes || item.barcode, category: item.Category || item.category, isAudited: false, uid: 'new-' + Date.now() + '-' + idx 
-                    }));
-                    activeItems = [...existingItems, ...newItems];
+                // RESUME LOGIC: Map saved progress onto the current inventory
+                const hRes = await fetch('/api/history'); 
+                const hist = await hRes.json();
+                const savedAudit = hist.find(a => a.id == resId);
+
+                if (savedAudit) {
+                    currentAuditId = savedAudit.id; 
+                    auditName = savedAudit.name;
+
+                    const scannedBarcodes = new Set(
+                        savedAudit.items.filter(i => i.isAudited).map(i => i.barcode)
+                    );
+
+                    activeItems = currentInventory.map(item => {
+                        if (scannedBarcodes.has(item.barcode)) {
+                            item.isAudited = true;
+                        }
+                        return item;
+                    });
                 }
             } else if (newN) {
-                activeItems = masterAssetData.assets.filter(item => {
-                    const itemClass = (item.Class || item.class || "").toLowerCase();
-                    return !badB.has(item.Barcodes || item.barcode) && !itemClass.includes('kit') && !itemClass.includes('header') && (item.Category || item.category);
-                }).map((item, idx) => ({ 
-                    ...item, name: item['Asset Name'] || item.name, barcode: item.Barcodes || item.barcode, category: item.Category || item.category, isAudited: false, uid: 'item-' + Date.now() + '-' + idx 
-                }));
-                currentAuditId = Date.now().toString(); auditName = newN;
+                // NEW AUDIT LOGIC
+                activeItems = currentInventory;
+                currentAuditId = Date.now().toString(); 
+                auditName = newN;
             }
+
             render();
-            
-            // Loops
-            setInterval(autosave, 2000);   // Save progress
-            setInterval(syncBackend, 3000); // Sync SISO/Collected status
+            setInterval(autosave, 2000);   // Progress save
+            setInterval(syncBackend, 3000); // SISO sync
         };
 
         async function syncBackend() {
@@ -151,7 +173,7 @@
             const groups = {};
             activeItems.forEach(item => {
                 if (!groups[item.name]) groups[item.name] = { name: item.name, category: item.category, total: 0, audited: 0, barcodes: [] };
-                if (!item.isCollected) groups[item.name].total++;
+                if (!item.isCollected) groups[item.name].total++; // Only count items in store
                 if (item.isAudited) groups[item.name].audited++;
                 groups[item.name].barcodes.push(item);
             });
