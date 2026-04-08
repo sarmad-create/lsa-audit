@@ -59,44 +59,29 @@
             const issues = await iRes.json();
             const masterAssetData = await aRes.json();
             
-            // MAP MAINTENANCE ITEMS BY BARCODE AND NAME
             const badBarcodes = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
-            
-            // Create a count of how many of each item name are in maintenance (for non-barcoded items)
             const maintenanceNameCounts = {};
-            issues.forEach(i => {
-                if (!i.barcode || i.barcode === 'NONE') {
-                    maintenanceNameCounts[i.item] = (maintenanceNameCounts[i.item] || 0) + 1;
-                }
-            });
+            issues.forEach(i => { if (!i.barcode || i.barcode === 'NONE') maintenanceNameCounts[i.item] = (maintenanceNameCounts[i.item] || 0) + 1; });
 
-            // 2. Define the "True" inventory from current CSV
             let tempInventory = masterAssetData.assets.filter(item => {
                 const itemClass = (item.Class || item.class || "").toLowerCase();
                 const bc = item.Barcodes || item.barcode;
-                
-                // Keep everything that isn't a Header and isn't a specific bad barcode
-                return !badBarcodes.has(bc) && 
-                       !itemClass.includes('header') && 
-                       (item.Category || item.category);
+                return !badBarcodes.has(bc) && !itemClass.includes('header') && (item.Category || item.category);
             });
 
-            // HANDLE NON-BARCODED ITEMS (Like Blimps)
-            // If an item name matches one in maintenanceNameCounts, skip that specific instance
             const currentInventory = [];
             const usedMaintenanceCounts = {};
 
             tempInventory.forEach((item, idx) => {
                 const name = item['Asset Name'] || item.name;
-                const bc = item.Barcodes || item.barcode;
+                const bc = item.Barcodes || item.barcode || 'NONE';
 
-                if (!bc || bc === 'NONE') {
+                if (bc === 'NONE') {
                     const maintenanceNeeded = maintenanceNameCounts[name] || 0;
                     const alreadyRemoved = usedMaintenanceCounts[name] || 0;
-
                     if (alreadyRemoved < maintenanceNeeded) {
                         usedMaintenanceCounts[name] = alreadyRemoved + 1;
-                        return; // Skip this item, it's in maintenance
+                        return;
                     }
                 }
 
@@ -106,7 +91,8 @@
                     barcode: bc,
                     category: item.Category || item.category,
                     isAudited: false, 
-                    uid: 'item-' + Date.now() + '-' + idx
+                    isCollected: item.isCollected || false,
+                    uid: 'item-' + idx + '-' + Date.now()
                 });
             });
 
@@ -114,14 +100,20 @@
                 const hRes = await fetch('/api/history'); 
                 const hist = await hRes.json();
                 const savedAudit = hist.find(a => a.id == resId);
-
                 if (savedAudit) {
                     currentAuditId = savedAudit.id; 
                     auditName = savedAudit.name;
-                    const scannedBarcodes = new Set(savedAudit.items.filter(i => i.isAudited).map(i => i.barcode));
+                    const scannedBarcodes = new Set(savedAudit.items.filter(i => i.isAudited && i.barcode !== 'NONE').map(i => i.barcode));
+                    const tickedNamesCount = {};
+                    savedAudit.items.filter(i => i.isAudited && i.barcode === 'NONE').forEach(i => tickedNamesCount[i.name] = (tickedNamesCount[i.name] || 0) + 1);
+
+                    const usedTickedCounts = {};
                     activeItems = currentInventory.map(item => {
-                        if (scannedBarcodes.has(item.barcode)) {
-                            item.isAudited = true;
+                        if (item.barcode !== 'NONE' && scannedBarcodes.has(item.barcode)) item.isAudited = true;
+                        if (item.barcode === 'NONE') {
+                            const target = tickedNamesCount[item.name] || 0;
+                            const current = usedTickedCounts[item.name] || 0;
+                            if (current < target) { item.isAudited = true; usedTickedCounts[item.name] = current + 1; }
                         }
                         return item;
                     });
@@ -143,13 +135,36 @@
                 const data = await res.json();
                 const freshAssets = data.assets;
                 let changed = false;
-                activeItems.forEach(item => {
-                    const match = freshAssets.find(fa => (fa.Barcodes || fa.barcode) === (item.barcode || item.Barcodes));
+
+                // 1. Sync Barcoded items directly
+                activeItems.filter(i => i.barcode !== 'NONE').forEach(item => {
+                    const match = freshAssets.find(fa => (fa.Barcodes || fa.barcode) === item.barcode);
                     if (match && match.isCollected !== item.isCollected) {
                         item.isCollected = match.isCollected;
                         changed = true;
                     }
                 });
+
+                // 2. Sync Non-Barcoded items by counting how many of each name are "isCollected"
+                const collectedCountsInDB = {};
+                freshAssets.filter(fa => (!fa.Barcodes || fa.barcode === 'NONE') && fa.isCollected).forEach(fa => {
+                    const name = fa['Asset Name'] || fa.name;
+                    collectedCountsInDB[name] = (collectedCountsInDB[name] || 0) + 1;
+                });
+
+                const processedCounts = {};
+                activeItems.filter(i => i.barcode === 'NONE').forEach(item => {
+                    const dbCollectedCount = collectedCountsInDB[item.name] || 0;
+                    const alreadyMarked = processedCounts[item.name] || 0;
+                    
+                    const shouldBeCollected = alreadyMarked < dbCollectedCount;
+                    if (item.isCollected !== shouldBeCollected) {
+                        item.isCollected = shouldBeCollected;
+                        changed = true;
+                    }
+                    processedCounts[item.name] = alreadyMarked + 1;
+                });
+
                 if (changed) { isDirty = true; render(); }
             } catch (e) { console.error("Sync failed", e); }
         }
