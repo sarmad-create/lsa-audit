@@ -60,7 +60,7 @@
             const issues = await iRes.json();
             const masterAssetData = await aRes.json();
             
-            // Maintenance Filter (Disregard missing/broken items)
+            // Maintenance Filter: Disregard missing/broken items
             const maintenanceBarcodes = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
             const maintenanceNames = new Set(issues.filter(i => i.barcode === 'NONE' || !i.barcode).map(i => i.item));
 
@@ -68,10 +68,9 @@
                 const itemClass = (item.Class || item.class || "").toLowerCase();
                 const bc = item.Barcodes || item.barcode;
                 const name = item['Asset Name'] || item.name;
-
                 const inMaintenance = maintenanceBarcodes.has(bc) || maintenanceNames.has(name);
 
-                // Removed "Kit" rule - only blocking headers now
+                // KEY FIX: Removed the "kit" filter. Only blocking "headers" and maintenance items now.
                 return !inMaintenance && 
                        !itemClass.includes('header') && 
                        (item.Category || item.category);
@@ -93,13 +92,9 @@
                     currentAuditId = savedAudit.id; 
                     auditName = savedAudit.name;
 
-                    const scannedBarcodes = new Set(
-                        savedAudit.items.filter(i => i.isAudited).map(i => i.barcode)
-                    );
-                    
-                    const tickedUids = new Set(
-                        savedAudit.items.filter(i => i.isAudited && (!i.barcode || i.barcode === 'NONE')).map(i => i.uid)
-                    );
+                    // Sync state from history onto current inventory to prevent count bloat
+                    const scannedBarcodes = new Set(savedAudit.items.filter(i => i.isAudited).map(i => i.barcode));
+                    const tickedUids = new Set(savedAudit.items.filter(i => i.isAudited && (!i.barcode || i.barcode === 'NONE')).map(i => i.uid));
 
                     activeItems = currentInventory.map(item => {
                         if (scannedBarcodes.has(item.barcode) || tickedUids.has(item.uid)) {
