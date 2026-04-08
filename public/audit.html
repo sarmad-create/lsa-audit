@@ -48,7 +48,12 @@
         let isDirty = false;
         const CAT_ORDER = { "Video": 1, "Sound": 2, "Lighting": 3, "Grip": 4 };
 
-        function esc(str) { return str ? str.replace(/'/g, "\\'") : ""; }
+        // IMPROVED: Escape function to handle punctuation for JS attributes
+        function esc(str) { 
+            if (!str) return "";
+            return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        }
+
         function keepFocus() { const s = document.getElementById('scanner'); if (document.activeElement !== s) s.focus(); }
 
         window.onload = async () => {
@@ -57,7 +62,6 @@
             const newN = p.get('name');
             document.addEventListener('click', (e) => { if (e.target.tagName !== 'INPUT') keepFocus(); });
 
-            // Fetch live data
             const [iRes, aRes] = await Promise.all([fetch('/api/issues'), fetch('/api/assets')]);
             const issues = await iRes.json();
             const masterAssetData = await aRes.json();
@@ -66,7 +70,6 @@
             const maintenanceNameCounts = {};
             issues.forEach(i => { if (!i.barcode || i.barcode === 'NONE') maintenanceNameCounts[i.item] = (maintenanceNameCounts[i.item] || 0) + 1; });
 
-            // Build the core inventory based on current CSV/Live state
             let tempInventory = masterAssetData.assets.filter(item => {
                 const itemClass = (item.Class || item.class || "").toLowerCase();
                 const bc = item.Barcodes || item.barcode || 'NONE';
@@ -104,19 +107,15 @@
                 if (savedAudit) {
                     currentAuditId = savedAudit.id; 
                     auditName = savedAudit.name;
-                    
-                    // Cross-reference saved audit state with LIVE collected state
                     const scannedBarcodes = new Set(savedAudit.items.filter(i => i.isAudited && i.barcode !== 'NONE').map(i => i.barcode));
                     const tickedNamesCount = {};
                     savedAudit.items.filter(i => i.isAudited && i.barcode === 'NONE').forEach(i => tickedNamesCount[i.name] = (tickedNamesCount[i.name] || 0) + 1);
 
                     const usedTickedCounts = {};
                     activeItems = currentInventory.map(item => {
-                        // Priority 1: If item is live 'Collected', it's NOT audited, it's SISO-Out.
                         if (item.isCollected) {
                             item.isAudited = false;
                         } else {
-                            // Priority 2: Restore previous scan state if it's still in the building
                             if (item.barcode !== 'NONE' && scannedBarcodes.has(item.barcode)) item.isAudited = true;
                             if (item.barcode === 'NONE') {
                                 const target = tickedNamesCount[item.name] || 0;
@@ -145,17 +144,15 @@
                 const freshAssets = data.assets;
                 let changed = false;
 
-                // Sync Barcoded Items
                 activeItems.filter(i => i.barcode !== 'NONE').forEach(item => {
                     const match = freshAssets.find(fa => (fa.Barcodes || fa.barcode) === item.barcode);
                     if (match && match.isCollected !== item.isCollected) {
                         item.isCollected = match.isCollected;
-                        if (item.isCollected) item.isAudited = false; // If it leaves the building, it's no longer 'audited'
+                        if (item.isCollected) item.isAudited = false;
                         changed = true;
                     }
                 });
 
-                // Sync Non-Barcoded Items
                 const collectedCountsInDB = {};
                 freshAssets.filter(fa => (!fa.Barcodes || fa.barcode === 'NONE') && fa.isCollected).forEach(fa => {
                     const name = fa['Asset Name'] || fa.name;
@@ -248,17 +245,18 @@
             gArr.forEach(g => {
                 gAud += g.audited; gTarg += g.total;
                 const isOpen = openNames.has(g.name);
+                const escapedName = esc(g.name);
                 const div = document.createElement('div');
                 div.className = `audit-row-item ${g.audited >= g.total ? 'row-complete' : ''} ${isOpen ? 'open' : ''} cat-${(g.category || 'General').replace(/\s/g, '')}`;
                 
                 const qtyInputHtml = g.hasNoBarcode ? `
                     <div class="flex items-center gap-1 ml-4" onclick="event.stopPropagation()">
-                        <input type="number" id="qty-${esc(g.name)}" class="qty-input" value="${g.audited}" 
-                               onkeypress="if(event.key==='Enter') handleBulkAudit('${esc(g.name)}', this.value)">
-                        <button onclick="handleBulkAudit('${esc(g.name)}', document.getElementById('qty-${esc(g.name)}').value)" class="qty-btn">Add</button>
+                        <input type="number" id="qty-${escapedName}" class="qty-input" value="${g.audited}" 
+                               onkeypress="if(event.key==='Enter') handleBulkAudit('${escapedName}', this.value)">
+                        <button onclick="handleBulkAudit('${escapedName}', document.getElementById('qty-${escapedName}').value)" class="qty-btn">Add</button>
                     </div>` : '';
 
-                div.innerHTML = `<div class="p-3 flex justify-between items-center cursor-pointer" onclick="toggleAccordion('${esc(g.name)}')">
+                div.innerHTML = `<div class="p-3 flex justify-between items-center cursor-pointer" onclick="toggleAccordion('${escapedName}')">
                     <div class="flex-1 flex items-center">
                         <div>
                             <p class="font-bold text-sm text-white">${g.name}</p>
