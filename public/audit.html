@@ -18,7 +18,7 @@
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
         input#scanner { font-size: 16px !important; }
         #autosave-indicator { transition: opacity 0.5s; opacity: 0; }
-        .qty-input { background: #0f172a; border: 1px solid #334155; color: white; width: 45px; text-align: center; border-radius: 4px; font-weight: bold; }
+        .qty-input { background: #0f172a; border: 1px solid #334155; color: white; width: 55px; text-align: center; border-radius: 4px; font-weight: bold; padding: 2px; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
@@ -60,7 +60,7 @@
             const issues = await iRes.json();
             const masterAssetData = await aRes.json();
             
-            // Comprehensive Maintenance Filter (Barcode OR Name)
+            // Maintenance Filter (Disregard missing/broken items)
             const maintenanceBarcodes = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
             const maintenanceNames = new Set(issues.filter(i => i.barcode === 'NONE' || !i.barcode).map(i => i.item));
 
@@ -71,8 +71,8 @@
 
                 const inMaintenance = maintenanceBarcodes.has(bc) || maintenanceNames.has(name);
 
+                // Removed "Kit" rule - only blocking headers now
                 return !inMaintenance && 
-                       !itemClass.includes('kit') && 
                        !itemClass.includes('header') && 
                        (item.Category || item.category);
             }).map((item, idx) => ({
@@ -93,13 +93,18 @@
                     currentAuditId = savedAudit.id; 
                     auditName = savedAudit.name;
 
-                    // Match logic: If barcode exists, match by barcode. If not, match by name + original UID.
+                    const scannedBarcodes = new Set(
+                        savedAudit.items.filter(i => i.isAudited).map(i => i.barcode)
+                    );
+                    
+                    const tickedUids = new Set(
+                        savedAudit.items.filter(i => i.isAudited && (!i.barcode || i.barcode === 'NONE')).map(i => i.uid)
+                    );
+
                     activeItems = currentInventory.map(item => {
-                        const savedMatch = savedAudit.items.find(si => {
-                            if (item.barcode && item.barcode !== 'NONE') return si.barcode === item.barcode;
-                            return si.name === item.name && si.uid === item.uid; // Note: simplified logic
-                        });
-                        if (savedMatch) item.isAudited = savedMatch.isAudited;
+                        if (scannedBarcodes.has(item.barcode) || tickedUids.has(item.uid)) {
+                            item.isAudited = true;
+                        }
                         return item;
                     });
                 }
@@ -202,7 +207,6 @@
                 const div = document.createElement('div');
                 div.className = `audit-row-item ${g.audited >= g.total ? 'row-complete' : ''} ${isOpen ? 'open' : ''} cat-${(g.category || 'General').replace(/\s/g, '')}`;
                 
-                // Bulk input field for non-barcode items
                 const bulkInput = g.hasNoBarcode ? 
                     `<input type="number" class="qty-input ml-2" value="${g.audited}" min="0" max="${g.total}" 
                         onclick="event.stopPropagation()" 
