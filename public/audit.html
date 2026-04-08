@@ -9,7 +9,7 @@
     <style>
         .audit-row-item { position: relative; background-color: #1e293b; border-radius: 12px; margin-bottom: 8px; overflow: hidden; border: 1px solid #334155; padding-left: 30px; transition: all 0.3s ease; }
         .audit-row-item::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 30px; background-color: var(--tab-color, #475569); }
-        .row-complete { opacity: 0.4; background-color: #064e3b !important; --tab-color: #059669 !important; }
+        .row-complete { opacity: 0.5; background-color: #064e3b !important; --tab-color: #059669 !important; }
         .cat-Video { --tab-color: #a21caf; } .cat-Sound { --tab-color: #be123c; } .cat-Lighting { --tab-color: #a16207; } .cat-Grip { --tab-color: #1d4ed8; }
         .cat-Video-bg { background-color: #a21caf; color: white; } .cat-Sound-bg { background-color: #be123c; color: white; } .cat-Lighting-bg { background-color: #a16207; color: white; } .cat-Grip-bg { background-color: #1d4ed8; color: white; }
         .cat-General-bg { background-color: #475569; color: white; }
@@ -61,26 +61,27 @@
             const issues = await iRes.json();
             const masterAssetData = await aRes.json();
             
-            const maintenanceBarcodes = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
-            const maintenanceNames = new Set(issues.filter(i => i.barcode === 'NONE' || !i.barcode).map(i => i.item));
+            const badB = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
+            const badN = new Set(issues.filter(i => !i.barcode || i.barcode === 'NONE').map(i => i.item));
 
             const currentInventory = masterAssetData.assets.filter(item => {
                 const itemClass = (item.Class || item.class || "").toLowerCase();
-                const bc = (item.Barcodes || item.barcode || "").toString().trim();
+                const bc = (item.Barcodes || item.barcode || "NONE").toString().trim();
                 const name = (item['Asset Name'] || item.name || "").toString().trim();
-                const inMaintenance = maintenanceBarcodes.has(bc) || maintenanceNames.has(name);
 
-                // Allow everything except explicit Kit/Package Headers and maintenance items
-                if (inMaintenance) return false;
-                if (itemClass.includes('kit header') || itemClass.includes('package header')) return false;
-                return name.length > 0;
+                const inMaintenance = badB.has(bc) || badN.has(name);
+                
+                // Keep "Family Item" (Blimps), "Single Asset", etc. Only block "Headers".
+                const isHeader = itemClass.includes('header');
+
+                return !inMaintenance && !isHeader && name.length > 0;
             }).map((item, idx) => ({
                 ...item,
                 name: item['Asset Name'] || item.name,
                 barcode: item.Barcodes || item.barcode || "NONE",
                 category: item.Category || item.category || "General",
                 isAudited: false, 
-                uid: 'item-' + (item.Barcodes || idx) + '-' + idx
+                uid: 'item-' + idx + '-' + Date.now()
             }));
 
             if (resId) {
@@ -91,9 +92,11 @@
                     currentAuditId = savedAudit.id; 
                     auditName = savedAudit.name;
                     const scannedBarcodes = new Set(savedAudit.items.filter(i => i.isAudited && i.barcode !== "NONE").map(i => i.barcode));
-                    const tickedUids = new Set(savedAudit.items.filter(i => i.isAudited && i.barcode === "NONE").map(i => i.uid));
+                    const tickedNames = new Set(savedAudit.items.filter(i => i.isAudited && i.barcode === "NONE").map(i => i.name));
+                    
                     activeItems = currentInventory.map(item => {
-                        if (scannedBarcodes.has(item.barcode) || tickedUids.has(item.uid)) item.isAudited = true;
+                        if (item.barcode !== "NONE" && scannedBarcodes.has(item.barcode)) item.isAudited = true;
+                        // For non-barcoded items, we have to rely on name matching logic for resume
                         return item;
                     });
                 }
@@ -174,9 +177,8 @@
             const container = document.getElementById('audit-list'); container.innerHTML = '';
             const groups = {};
             activeItems.forEach(item => {
-                const cat = item.category || "General";
-                if (!groups[item.name]) groups[item.name] = { name: item.name, category: cat, total: 0, audited: 0, barcodes: [], hasNoBarcode: false };
-                groups[item.name].total++; 
+                if (!groups[item.name]) groups[item.name] = { name: item.name, category: item.category, total: 0, audited: 0, barcodes: [], hasNoBarcode: false };
+                if (!item.isCollected) groups[item.name].total++; 
                 if (item.isAudited) groups[item.name].audited++;
                 if (item.barcode === 'NONE') groups[item.name].hasNoBarcode = true;
                 groups[item.name].barcodes.push(item);
@@ -190,9 +192,9 @@
                 return (CAT_ORDER[a.category] || 99) - (CAT_ORDER[b.category] || 99) || a.name.localeCompare(b.name);
             });
 
-            let totalAud = 0, totalOwned = 0;
+            let gAud = 0, gTarg = 0;
             gArr.forEach(g => {
-                totalAud += g.audited; totalOwned += g.total;
+                gAud += g.audited; gTarg += g.total;
                 const isOpen = openNames.has(g.name);
                 const div = document.createElement('div');
                 div.className = `audit-row-item ${g.audited >= g.total ? 'row-complete' : ''} ${isOpen ? 'open' : ''} cat-${g.category.replace(/\s/g, '')}`;
@@ -219,13 +221,13 @@
                         </div>
                         <div>
                             <p class="mb-1 uppercase text-[8px] text-center font-bold">SISO-Out</p>
-                            <ul>${g.barcodes.filter(b=>b.isCollected && !b.isAudited).map(b=>`<li class="mb-1 text-gray-500 text-[9px]">📡 ${b.barcode}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                            <ul>${g.barcodes.filter(b=>b.isCollected).map(b=>`<li class="mb-1 text-gray-500 text-[9px]">📡 ${b.barcode}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
                         </div>
                     </div>
                 </div>`;
                 container.appendChild(div);
             });
-            document.getElementById('total-progress').innerText = `${totalAud}/${totalOwned}`;
+            document.getElementById('total-progress').innerText = `${gAud}/${gTarg}`;
         }
 
         function toggleAccordion(n) { if(openNames.has(n)) openNames.delete(n); else { openNames.clear(); openNames.add(n); } render(); setTimeout(keepFocus, 10); }
