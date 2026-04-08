@@ -55,33 +55,62 @@
             const newN = p.get('name');
             document.addEventListener('click', () => keepFocus());
 
-            // 1. Always fetch the freshest data first
             const [iRes, aRes] = await Promise.all([fetch('/api/issues'), fetch('/api/assets')]);
             const issues = await iRes.json();
             const masterAssetData = await aRes.json();
             
-            // Map maintenance items
-            const badB = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
+            // MAP MAINTENANCE ITEMS BY BARCODE AND NAME
+            const badBarcodes = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
+            
+            // Create a count of how many of each item name are in maintenance (for non-barcoded items)
+            const maintenanceNameCounts = {};
+            issues.forEach(i => {
+                if (!i.barcode || i.barcode === 'NONE') {
+                    maintenanceNameCounts[i.item] = (maintenanceNameCounts[i.item] || 0) + 1;
+                }
+            });
 
             // 2. Define the "True" inventory from current CSV
-            const currentInventory = masterAssetData.assets.filter(item => {
+            let tempInventory = masterAssetData.assets.filter(item => {
                 const itemClass = (item.Class || item.class || "").toLowerCase();
                 const bc = item.Barcodes || item.barcode;
-                return !badB.has(bc) && 
-                       !itemClass.includes('kit') && 
+                
+                // Keep everything that isn't a Header and isn't a specific bad barcode
+                return !badBarcodes.has(bc) && 
                        !itemClass.includes('header') && 
                        (item.Category || item.category);
-            }).map((item, idx) => ({
-                ...item,
-                name: item['Asset Name'] || item.name,
-                barcode: item.Barcodes || item.barcode,
-                category: item.Category || item.category,
-                isAudited: false, 
-                uid: 'item-' + Date.now() + '-' + idx
-            }));
+            });
+
+            // HANDLE NON-BARCODED ITEMS (Like Blimps)
+            // If an item name matches one in maintenanceNameCounts, skip that specific instance
+            const currentInventory = [];
+            const usedMaintenanceCounts = {};
+
+            tempInventory.forEach((item, idx) => {
+                const name = item['Asset Name'] || item.name;
+                const bc = item.Barcodes || item.barcode;
+
+                if (!bc || bc === 'NONE') {
+                    const maintenanceNeeded = maintenanceNameCounts[name] || 0;
+                    const alreadyRemoved = usedMaintenanceCounts[name] || 0;
+
+                    if (alreadyRemoved < maintenanceNeeded) {
+                        usedMaintenanceCounts[name] = alreadyRemoved + 1;
+                        return; // Skip this item, it's in maintenance
+                    }
+                }
+
+                currentInventory.push({
+                    ...item,
+                    name: name,
+                    barcode: bc,
+                    category: item.Category || item.category,
+                    isAudited: false, 
+                    uid: 'item-' + Date.now() + '-' + idx
+                });
+            });
 
             if (resId) {
-                // RESUME LOGIC: Map saved progress onto the current inventory
                 const hRes = await fetch('/api/history'); 
                 const hist = await hRes.json();
                 const savedAudit = hist.find(a => a.id == resId);
@@ -89,11 +118,7 @@
                 if (savedAudit) {
                     currentAuditId = savedAudit.id; 
                     auditName = savedAudit.name;
-
-                    const scannedBarcodes = new Set(
-                        savedAudit.items.filter(i => i.isAudited).map(i => i.barcode)
-                    );
-
+                    const scannedBarcodes = new Set(savedAudit.items.filter(i => i.isAudited).map(i => i.barcode));
                     activeItems = currentInventory.map(item => {
                         if (scannedBarcodes.has(item.barcode)) {
                             item.isAudited = true;
@@ -102,15 +127,14 @@
                     });
                 }
             } else if (newN) {
-                // NEW AUDIT LOGIC
                 activeItems = currentInventory;
                 currentAuditId = Date.now().toString(); 
                 auditName = newN;
             }
 
             render();
-            setInterval(autosave, 2000);   // Progress save
-            setInterval(syncBackend, 3000); // SISO sync
+            setInterval(autosave, 2000);
+            setInterval(syncBackend, 3000);
         };
 
         async function syncBackend() {
@@ -118,7 +142,6 @@
                 const res = await fetch('/api/assets');
                 const data = await res.json();
                 const freshAssets = data.assets;
-                
                 let changed = false;
                 activeItems.forEach(item => {
                     const match = freshAssets.find(fa => (fa.Barcodes || fa.barcode) === (item.barcode || item.Barcodes));
@@ -127,11 +150,7 @@
                         changed = true;
                     }
                 });
-
-                if (changed) {
-                    isDirty = true;
-                    render();
-                }
+                if (changed) { isDirty = true; render(); }
             } catch (e) { console.error("Sync failed", e); }
         }
 
@@ -173,7 +192,7 @@
             const groups = {};
             activeItems.forEach(item => {
                 if (!groups[item.name]) groups[item.name] = { name: item.name, category: item.category, total: 0, audited: 0, barcodes: [] };
-                if (!item.isCollected) groups[item.name].total++; // Only count items in store
+                if (!item.isCollected) groups[item.name].total++; 
                 if (item.isAudited) groups[item.name].audited++;
                 groups[item.name].barcodes.push(item);
             });
@@ -205,7 +224,7 @@
                         </div>
                         <div>
                             <p class="mb-1 uppercase text-[8px] text-center text-gray-400 font-bold">In-Store</p>
-                            <ul>${g.barcodes.filter(b=>!b.isCollected && !b.isAudited).map(b=>`<li class="mb-1 flex justify-between">📦 ${b.barcode||'No BC'} ${!b.barcode?`<button onclick="manualTick('${b.uid}')" class="bg-blue-600 px-1 rounded text-[8px]">TICK</button>`:''}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                            <ul>${g.barcodes.filter(b=>!b.isCollected && !b.isAudited).map(b=>`<li class="mb-1 flex justify-between">📦 ${b.barcode||'No BC'} ${(!b.barcode || b.barcode==='NONE')?`<button onclick="manualTick('${b.uid}')" class="bg-blue-600 px-1 rounded text-[8px]">TICK</button>`:''}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
                         </div>
                         <div>
                             <p class="mb-1 uppercase text-[8px] text-center font-bold">SISO-Out</p>
