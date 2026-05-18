@@ -48,7 +48,6 @@
         let isDirty = false;
         const CAT_ORDER = { "Video": 1, "Sound": 2, "Lighting": 3, "Grip": 4 };
 
-        // IMPROVED: Escape function to handle punctuation for JS attributes
         function esc(str) { 
             if (!str) return "";
             return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
@@ -70,18 +69,19 @@
             const maintenanceNameCounts = {};
             issues.forEach(i => { if (!i.barcode || i.barcode === 'NONE') maintenanceNameCounts[i.item] = (maintenanceNameCounts[i.item] || 0) + 1; });
 
+            // FIXED FILTER: Allow items where barcode is 'NONE'
             let tempInventory = masterAssetData.assets.filter(item => {
                 const itemClass = (item.Class || item.class || "").toLowerCase();
-                const bc = item.Barcodes || item.barcode || 'NONE';
-                return !badBarcodes.has(bc) && !itemClass.includes('header') && (item.Category || item.category);
+                const bc = item.barcode || item.Barcodes || 'NONE';
+                return !badBarcodes.has(bc) && !itemClass.includes('header');
             });
 
             const currentInventory = [];
             const usedMaintenanceCounts = {};
 
             tempInventory.forEach((item, idx) => {
-                const name = item['Asset Name'] || item.name;
-                const bc = item.Barcodes || item.barcode || 'NONE';
+                const name = item.name || item['Asset Name'];
+                const bc = item.barcode || item.Barcodes || 'NONE';
 
                 if (bc === 'NONE') {
                     const mCount = maintenanceNameCounts[name] || 0;
@@ -93,7 +93,7 @@
                     ...item,
                     name: name,
                     barcode: bc,
-                    category: item.Category || item.category,
+                    category: item.category || item.Category || 'General',
                     isAudited: false, 
                     isCollected: item.isCollected || false,
                     uid: 'item-' + idx + '-' + Date.now()
@@ -107,24 +107,7 @@
                 if (savedAudit) {
                     currentAuditId = savedAudit.id; 
                     auditName = savedAudit.name;
-                    const scannedBarcodes = new Set(savedAudit.items.filter(i => i.isAudited && i.barcode !== 'NONE').map(i => i.barcode));
-                    const tickedNamesCount = {};
-                    savedAudit.items.filter(i => i.isAudited && i.barcode === 'NONE').forEach(i => tickedNamesCount[i.name] = (tickedNamesCount[i.name] || 0) + 1);
-
-                    const usedTickedCounts = {};
-                    activeItems = currentInventory.map(item => {
-                        if (item.isCollected) {
-                            item.isAudited = false;
-                        } else {
-                            if (item.barcode !== 'NONE' && scannedBarcodes.has(item.barcode)) item.isAudited = true;
-                            if (item.barcode === 'NONE') {
-                                const target = tickedNamesCount[item.name] || 0;
-                                const current = usedTickedCounts[item.name] || 0;
-                                if (current < target) { item.isAudited = true; usedTickedCounts[item.name] = current + 1; }
-                            }
-                        }
-                        return item;
-                    });
+                    activeItems = savedAudit.items;
                 }
             } else if (newN) {
                 activeItems = currentInventory;
@@ -144,32 +127,20 @@
                 const freshAssets = data.assets;
                 let changed = false;
 
-                activeItems.filter(i => i.barcode !== 'NONE').forEach(item => {
-                    const match = freshAssets.find(fa => (fa.Barcodes || fa.barcode) === item.barcode);
+                activeItems.forEach(item => {
+                    let match;
+                    if (item.barcode !== 'NONE') {
+                        match = freshAssets.find(fa => (fa.barcode || fa.Barcodes) === item.barcode);
+                    } else {
+                        // Match by name for non-barcoded items
+                        match = freshAssets.find(fa => (fa.name || fa['Asset Name']) === item.name && (fa.barcode || fa.Barcodes || 'NONE') === 'NONE');
+                    }
+
                     if (match && match.isCollected !== item.isCollected) {
                         item.isCollected = match.isCollected;
                         if (item.isCollected) item.isAudited = false;
                         changed = true;
                     }
-                });
-
-                const collectedCountsInDB = {};
-                freshAssets.filter(fa => (!fa.Barcodes || fa.barcode === 'NONE') && fa.isCollected).forEach(fa => {
-                    const name = fa['Asset Name'] || fa.name;
-                    collectedCountsInDB[name] = (collectedCountsInDB[name] || 0) + 1;
-                });
-
-                const processedCounts = {};
-                activeItems.filter(i => i.barcode === 'NONE').forEach(item => {
-                    const dbCollectedCount = collectedCountsInDB[item.name] || 0;
-                    const alreadyMarked = processedCounts[item.name] || 0;
-                    const shouldBeCollected = alreadyMarked < dbCollectedCount;
-                    if (item.isCollected !== shouldBeCollected) {
-                        item.isCollected = shouldBeCollected;
-                        if (item.isCollected) item.isAudited = false;
-                        changed = true;
-                    }
-                    processedCounts[item.name] = alreadyMarked + 1;
                 });
 
                 if (changed) { isDirty = true; render(); }
@@ -270,15 +241,15 @@
                     <div class="grid grid-cols-3 gap-2">
                         <div>
                             <p class="mb-1 uppercase text-[8px] text-center text-green-500 font-bold">Scanned</p>
-                            <ul>${g.barcodes.filter(b=>b.isAudited).map(b=>`<li class="mb-1 flex justify-between">✅ ${b.barcode||'No BC'} <button onclick="unscan('${b.uid}')" class="text-red-500">✕</button></li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                            <ul>${g.barcodes.filter(b=>b.isAudited).map(b=>`<li class="mb-1 flex justify-between">✅ ${b.barcode==='NONE'?'No BC':b.barcode} <button onclick="unscan('${b.uid}')" class="text-red-500">✕</button></li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
                         </div>
                         <div>
                             <p class="mb-1 uppercase text-[8px] text-center text-gray-400 font-bold">In-Store</p>
-                            <ul>${g.barcodes.filter(b=>!b.isCollected && !b.isAudited).map(b=>`<li class="mb-1 flex justify-between">📦 ${b.barcode||'No BC'} ${(!b.barcode || b.barcode==='NONE')?`<button onclick="manualTick('${b.uid}')" class="bg-blue-600 px-1 rounded text-[8px]">TICK</button>`:''}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                            <ul>${g.barcodes.filter(b=>!b.isCollected && !b.isAudited).map(b=>`<li class="mb-1 flex justify-between">📦 ${b.barcode==='NONE'?'No BC':b.barcode} ${b.barcode==='NONE'?`<button onclick="manualTick('${b.uid}')" class="bg-blue-600 px-1 rounded text-[8px]">TICK</button>`:''}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
                         </div>
                         <div>
                             <p class="mb-1 uppercase text-[8px] text-center font-bold">SISO-Out</p>
-                            <ul>${g.barcodes.filter(b=>b.isCollected).map(b=>`<li class="mb-1 text-gray-500 text-[9px]">📡 ${b.barcode||'No BC'}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                            <ul>${g.barcodes.filter(b=>b.isCollected).map(b=>`<li class="mb-1 text-gray-500 text-[9px]">📡 ${b.barcode==='NONE'?'No BC':b.barcode}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
                         </div>
                     </div>
                 </div>`;
