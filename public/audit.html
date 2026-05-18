@@ -16,8 +16,10 @@
         .open .accordion-content { max-height: 5000px; }
         .error-flash { animation: shake 0.4s; border-color: #ef4444 !important; }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
+        input#scanner { font-size: 16px !important; }
         #autosave-indicator { transition: opacity 0.5s; opacity: 0; }
-        .qty-input { background: #0f172a; border: 1px solid #475569; color: white; width: 50px; border-radius: 4px; padding: 2px 4px; font-size: 11px; outline: none; }
+        .qty-input { background: #0f172a; border: 1px solid #475569; color: white; width: 45px; border-radius: 4px; padding: 2px 4px; font-size: 11px; outline: none; }
+        .qty-btn { background: #3b82f6; color: white; font-size: 9px; padding: 3px 6px; border-radius: 4px; font-weight: bold; text-transform: uppercase; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen">
@@ -46,7 +48,11 @@
         let isDirty = false;
         const CAT_ORDER = { "Video": 1, "Sound": 2, "Lighting": 3, "Grip": 4 };
 
-        function esc(str) { return str ? str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;') : ""; }
+        // IMPROVED: Escape function to handle punctuation for JS attributes
+        function esc(str) { 
+            if (!str) return "";
+            return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        }
 
         function keepFocus() { const s = document.getElementById('scanner'); if (document.activeElement !== s) s.focus(); }
 
@@ -61,53 +67,151 @@
             const masterAssetData = await aRes.json();
             
             const badBarcodes = new Set(issues.filter(i => i.barcode && i.barcode !== 'NONE').map(i => i.barcode));
+            const maintenanceNameCounts = {};
+            issues.forEach(i => { if (!i.barcode || i.barcode === 'NONE') maintenanceNameCounts[i.item] = (maintenanceNameCounts[i.item] || 0) + 1; });
 
             let tempInventory = masterAssetData.assets.filter(item => {
-                const bc = item.barcode || 'NONE';
-                return !badBarcodes.has(bc);
-            }).map((item, idx) => ({
-                ...item,
-                name: item.name || "Unknown Item",
-                barcode: item.barcode || 'NONE',
-                category: item.category || 'General',
-                isAudited: false, 
-                isCollected: item.isCollected || false,
-                uid: 'item-' + idx + '-' + Date.now()
-            }));
+                const itemClass = (item.Class || item.class || "").toLowerCase();
+                const bc = item.Barcodes || item.barcode || 'NONE';
+                return !badBarcodes.has(bc) && !itemClass.includes('header') && (item.Category || item.category);
+            });
+
+            const currentInventory = [];
+            const usedMaintenanceCounts = {};
+
+            tempInventory.forEach((item, idx) => {
+                const name = item['Asset Name'] || item.name;
+                const bc = item.Barcodes || item.barcode || 'NONE';
+
+                if (bc === 'NONE') {
+                    const mCount = maintenanceNameCounts[name] || 0;
+                    const used = usedMaintenanceCounts[name] || 0;
+                    if (used < mCount) { usedMaintenanceCounts[name] = used + 1; return; }
+                }
+
+                currentInventory.push({
+                    ...item,
+                    name: name,
+                    barcode: bc,
+                    category: item.Category || item.category,
+                    isAudited: false, 
+                    isCollected: item.isCollected || false,
+                    uid: 'item-' + idx + '-' + Date.now()
+                });
+            });
 
             if (resId) {
                 const hRes = await fetch('/api/history'); 
                 const hist = await hRes.json();
-                const saved = hist.find(a => a.id == resId);
-                if (saved) {
-                    currentAuditId = saved.id; auditName = saved.name;
-                    activeItems = saved.items;
+                const savedAudit = hist.find(a => a.id == resId);
+                if (savedAudit) {
+                    currentAuditId = savedAudit.id; 
+                    auditName = savedAudit.name;
+                    const scannedBarcodes = new Set(savedAudit.items.filter(i => i.isAudited && i.barcode !== 'NONE').map(i => i.barcode));
+                    const tickedNamesCount = {};
+                    savedAudit.items.filter(i => i.isAudited && i.barcode === 'NONE').forEach(i => tickedNamesCount[i.name] = (tickedNamesCount[i.name] || 0) + 1);
+
+                    const usedTickedCounts = {};
+                    activeItems = currentInventory.map(item => {
+                        if (item.isCollected) {
+                            item.isAudited = false;
+                        } else {
+                            if (item.barcode !== 'NONE' && scannedBarcodes.has(item.barcode)) item.isAudited = true;
+                            if (item.barcode === 'NONE') {
+                                const target = tickedNamesCount[item.name] || 0;
+                                const current = usedTickedCounts[item.name] || 0;
+                                if (current < target) { item.isAudited = true; usedTickedCounts[item.name] = current + 1; }
+                            }
+                        }
+                        return item;
+                    });
                 }
-            } else {
-                activeItems = tempInventory;
+            } else if (newN) {
+                activeItems = currentInventory;
                 currentAuditId = Date.now().toString(); 
                 auditName = newN;
             }
 
             render();
-            setInterval(autosave, 5000);
+            setInterval(autosave, 2000);
+            setInterval(syncBackend, 3000);
         };
+
+        async function syncBackend() {
+            try {
+                const res = await fetch('/api/assets');
+                const data = await res.json();
+                const freshAssets = data.assets;
+                let changed = false;
+
+                activeItems.filter(i => i.barcode !== 'NONE').forEach(item => {
+                    const match = freshAssets.find(fa => (fa.Barcodes || fa.barcode) === item.barcode);
+                    if (match && match.isCollected !== item.isCollected) {
+                        item.isCollected = match.isCollected;
+                        if (item.isCollected) item.isAudited = false;
+                        changed = true;
+                    }
+                });
+
+                const collectedCountsInDB = {};
+                freshAssets.filter(fa => (!fa.Barcodes || fa.barcode === 'NONE') && fa.isCollected).forEach(fa => {
+                    const name = fa['Asset Name'] || fa.name;
+                    collectedCountsInDB[name] = (collectedCountsInDB[name] || 0) + 1;
+                });
+
+                const processedCounts = {};
+                activeItems.filter(i => i.barcode === 'NONE').forEach(item => {
+                    const dbCollectedCount = collectedCountsInDB[item.name] || 0;
+                    const alreadyMarked = processedCounts[item.name] || 0;
+                    const shouldBeCollected = alreadyMarked < dbCollectedCount;
+                    if (item.isCollected !== shouldBeCollected) {
+                        item.isCollected = shouldBeCollected;
+                        if (item.isCollected) item.isAudited = false;
+                        changed = true;
+                    }
+                    processedCounts[item.name] = alreadyMarked + 1;
+                });
+
+                if (changed) { isDirty = true; render(); }
+            } catch (e) { console.error("Sync failed", e); }
+        }
+
+        async function autosave() {
+            if (!isDirty || !currentAuditId) return;
+            try {
+                const res = await fetch('/api/save-audit', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ id: currentAuditId, name: auditName, items: activeItems, status: 'In Progress' }) 
+                });
+                if(res.ok) {
+                    isDirty = false;
+                    const indicator = document.getElementById('autosave-indicator');
+                    indicator.style.opacity = "1";
+                    setTimeout(() => indicator.style.opacity = "0", 1000);
+                }
+            } catch (e) { console.error("Autosave failed", e); }
+        }
 
         function handleScan(val) {
             const bc = val.trim().toUpperCase().replace(/^LSA/i, '');
+            const inputEl = document.getElementById('scanner');
             if(!bc) return;
             let found = false;
             activeItems.forEach(item => {
-                if (item.barcode !== 'NONE' && String(item.barcode).toUpperCase().replace(/^LSA/i, '') === bc && !item.isAudited && !item.isCollected && !found) {
+                const itemBc = String(item.barcode || "").toUpperCase().replace(/^LSA/i, '');
+                if (itemBc === bc && !item.isAudited && !item.isCollected && !found) {
                     item.isAudited = true; found = true; isDirty = true;
                     lastScannedName = item.name; openNames.clear(); openNames.add(item.name);
                 }
             });
-            if(!found) { document.getElementById('scanner').classList.add('error-flash'); setTimeout(() => document.getElementById('scanner').classList.remove('error-flash'), 400); }
-            document.getElementById('scanner').value = ''; render();
+            if(!found) { inputEl.classList.add('error-flash'); setTimeout(() => inputEl.classList.remove('error-flash'), 400); }
+            inputEl.value = ''; render();
         }
 
-        function handleBulkAudit(name, qty) {
+        function handleBulkAudit(name, qtyStr) {
+            const qty = parseInt(qtyStr);
+            if (isNaN(qty) || qty < 0) return;
             let count = 0;
             activeItems.forEach(item => {
                 if (item.name === name && item.barcode === 'NONE' && !item.isCollected) {
@@ -115,59 +219,84 @@
                     count++;
                 }
             });
-            isDirty = true; render();
+            isDirty = true; render(); setTimeout(keepFocus, 10);
         }
 
         function render() {
             const container = document.getElementById('audit-list'); container.innerHTML = '';
             const groups = {};
             activeItems.forEach(item => {
-                if (!groups[item.name]) groups[item.name] = { name: item.name, category: item.category, total: 0, audited: 0, items: [], hasNoBC: false };
+                if (!groups[item.name]) groups[item.name] = { name: item.name, category: item.category, total: 0, audited: 0, barcodes: [], hasNoBarcode: false };
                 if (!item.isCollected) groups[item.name].total++; 
                 if (item.isAudited) groups[item.name].audited++;
-                if (item.barcode === 'NONE') groups[item.name].hasNoBC = true;
-                groups[item.name].items.push(item);
+                if (item.barcode === 'NONE') groups[item.name].hasNoBarcode = true;
+                groups[item.name].barcodes.push(item);
             });
             
-            Object.values(groups).sort((a,b) => (CAT_ORDER[a.category] - CAT_ORDER[b.category]) || a.name.localeCompare(b.name)).forEach(g => {
+            let gArr = Object.values(groups).sort((a,b) => {
+                const aC = a.audited >= a.total; const bC = b.audited >= b.total;
+                if (aC !== bC) return aC ? 1 : -1;
+                if (!aC && a.name === lastScannedName) return -1;
+                if (!aC && b.name === lastScannedName) return 1;
+                return (CAT_ORDER[a.category] - CAT_ORDER[b.category]) || a.name.localeCompare(b.name);
+            });
+
+            let gAud = 0, gTarg = 0;
+            gArr.forEach(g => {
+                gAud += g.audited; gTarg += g.total;
                 const isOpen = openNames.has(g.name);
+                const escapedName = esc(g.name);
                 const div = document.createElement('div');
-                div.className = `audit-row-item ${g.audited >= g.total ? 'row-complete' : ''} ${isOpen ? 'open' : ''} cat-${g.category.replace(/\s/g, '')}`;
+                div.className = `audit-row-item ${g.audited >= g.total ? 'row-complete' : ''} ${isOpen ? 'open' : ''} cat-${(g.category || 'General').replace(/\s/g, '')}`;
                 
-                div.innerHTML = `<div class="p-3 flex justify-between items-center cursor-pointer" onclick="toggleAccordion('${esc(g.name)}')">
-                    <div>
-                        <p class="font-bold text-sm text-white">${g.name}</p>
-                        <span class="text-[7px] px-1 py-0.5 rounded font-black uppercase cat-${g.category.replace(/\s/g, '')}-bg">${g.category}</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        ${g.hasNoBC ? `<input type="number" class="qty-input" value="${g.audited}" onclick="event.stopPropagation()" onchange="handleBulkAudit('${esc(g.name)}', this.value)">` : ''}
-                        <div class="text-xl font-black">${g.audited}/${g.total}</div>
-                    </div>
-                </div>
-                <div class="accordion-content bg-gray-900/80 px-2 pb-2">
-                    ${g.items.map(i => `
-                        <div class="flex justify-between items-center text-[10px] py-1 border-b border-gray-700">
-                            <span class="${i.isCollected ? 'text-gray-500' : 'text-gray-300'}">${i.barcode === 'NONE' ? 'No Barcode' : i.barcode} ${i.isCollected ? '(OUT)' : ''}</span>
-                            ${!i.isCollected ? `<button onclick="manualTick('${i.uid}')" class="${i.isAudited ? 'text-green-500' : 'text-blue-500'} font-bold">${i.isAudited ? '✅' : 'TICK'}</button>` : ''}
+                const qtyInputHtml = g.hasNoBarcode ? `
+                    <div class="flex items-center gap-1 ml-4" onclick="event.stopPropagation()">
+                        <input type="number" id="qty-${escapedName}" class="qty-input" value="${g.audited}" 
+                               onkeypress="if(event.key==='Enter') handleBulkAudit('${escapedName}', this.value)">
+                        <button onclick="handleBulkAudit('${escapedName}', document.getElementById('qty-${escapedName}').value)" class="qty-btn">Add</button>
+                    </div>` : '';
+
+                div.innerHTML = `<div class="p-3 flex justify-between items-center cursor-pointer" onclick="toggleAccordion('${escapedName}')">
+                    <div class="flex-1 flex items-center">
+                        <div>
+                            <p class="font-bold text-sm text-white">${g.name}</p>
+                            <span class="text-[7px] px-1 py-0.5 rounded font-black uppercase cat-${(g.category || 'General').replace(/\s/g, '')}-bg">${g.category}</span>
                         </div>
-                    `).join('')}
+                        ${qtyInputHtml}
+                    </div>
+                    <div class="text-xl font-black">${g.audited}/${g.total}</div>
+                </div>
+                <div class="accordion-content bg-gray-900/80 px-2 pb-2 text-[10px] font-mono">
+                    <div class="grid grid-cols-3 gap-2">
+                        <div>
+                            <p class="mb-1 uppercase text-[8px] text-center text-green-500 font-bold">Scanned</p>
+                            <ul>${g.barcodes.filter(b=>b.isAudited).map(b=>`<li class="mb-1 flex justify-between">✅ ${b.barcode||'No BC'} <button onclick="unscan('${b.uid}')" class="text-red-500">✕</button></li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                        </div>
+                        <div>
+                            <p class="mb-1 uppercase text-[8px] text-center text-gray-400 font-bold">In-Store</p>
+                            <ul>${g.barcodes.filter(b=>!b.isCollected && !b.isAudited).map(b=>`<li class="mb-1 flex justify-between">📦 ${b.barcode||'No BC'} ${(!b.barcode || b.barcode==='NONE')?`<button onclick="manualTick('${b.uid}')" class="bg-blue-600 px-1 rounded text-[8px]">TICK</button>`:''}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                        </div>
+                        <div>
+                            <p class="mb-1 uppercase text-[8px] text-center font-bold">SISO-Out</p>
+                            <ul>${g.barcodes.filter(b=>b.isCollected).map(b=>`<li class="mb-1 text-gray-500 text-[9px]">📡 ${b.barcode||'No BC'}</li>`).join('')||'<li class="text-gray-600 italic text-center">0</li>'}</ul>
+                        </div>
+                    </div>
                 </div>`;
                 container.appendChild(div);
             });
-            document.getElementById('total-progress').innerText = `${activeItems.filter(i=>i.isAudited).length}/${activeItems.filter(i=>!i.isCollected).length}`;
+            document.getElementById('total-progress').innerText = `${gAud}/${gTarg}`;
         }
 
-        function toggleAccordion(n) { openNames.has(n) ? openNames.delete(n) : (openNames.clear(), openNames.add(n)); render(); }
-        function manualTick(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited = !i.isAudited; isDirty=true; render(); } }
+        function toggleAccordion(n) { if(openNames.has(n)) openNames.delete(n); else { openNames.clear(); openNames.add(n); } render(); setTimeout(keepFocus, 10); }
+        function manualTick(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=true; isDirty=true; lastScannedName = i.name; render(); setTimeout(keepFocus, 10); } }
+        function unscan(uid) { const i = activeItems.find(x=>x.uid===uid); if(i){ i.isAudited=false; isDirty=true; render(); setTimeout(keepFocus, 10); } }
         
-        async function autosave() {
-            if (!isDirty || !currentAuditId) return;
-            await fetch('/api/save-audit', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: currentAuditId, name: auditName, items: activeItems, status: 'In Progress' }) });
-            isDirty = false;
-        }
-
         async function saveAndExit(s) { 
-            await autosave();
+            await fetch('/api/save-audit', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ id: currentAuditId, name: auditName, items: activeItems, status: s }) 
+            }); 
             window.location.href = '/';
         }
     </script>
